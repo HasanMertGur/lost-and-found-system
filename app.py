@@ -284,31 +284,40 @@ def get_messages(user_id):
     return jsonify(messages), 200
 
 # 8. Eşleşme Kaydı Oluşturma
+# 8. Gelişmiş Eşleşme Kaydı Oluşturma (Tek İlanlı Eşleşme Destekli)
 @app.route('/api/matches', methods=['POST'])
 def create_match():
     data = request.get_json()
-    lost_report_id = data.get('lost_report_id')
-    found_report_id = data.get('found_report_id')
+    lost_report_id = data.get('lost_report_id')  # NULL gelebilir kanka
+    found_report_id = data.get('found_report_id') # NULL gelebilir kanka
     
+    # Güvenlik Kontrolü: En az bir tanesi dolu olmak zorunda!
+    if not lost_report_id and not found_report_id:
+        return jsonify({"message": "Eşleşme oluşturabilmek için en least bir ilan ID'si gereklidir."}), 400
+        
     conn = get_db_connection()
     if conn is None: return jsonify({"message": "Veritabanı bağlantı hatası."}), 500
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     try:
-        cursor.execute("SELECT report_id, type FROM report WHERE report_id = %s;", (lost_report_id,))
-        lost = cursor.fetchone()
-        
-        cursor.execute("SELECT report_id, type FROM report WHERE report_id = %s;", (found_report_id,))
-        found = cursor.fetchone()
-        
-        if not lost: return jsonify({"message": f"lost_report_id={lost_report_id} bulunamadi."}), 404
-        if not found: return jsonify({"message": f"found_report_id={found_report_id} bulunamadi."}), 404
-        
-        if lost["type"] != "lost": return jsonify({"message": "lost_report_id 'lost' turunde degil."}), 400
-        if found["type"] != "found": return jsonify({"message": "found_report_id 'found' turunde degil."}), 400
-        
+        # Eğer Kayıp İlanı ID'si gönderildiyse doğrula
+        if lost_report_id:
+            cursor.execute("SELECT report_id, type FROM report WHERE report_id = %s;", (lost_report_id,))
+            lost = cursor.fetchone()
+            if not lost: return jsonify({"message": f"lost_report_id={lost_report_id} bulunamadi."}), 404
+            if lost["type"] != "lost": return jsonify({"message": "lost_report_id 'lost' turunde degil."}), 400
+            
+        # Eğer Buluntu İlanı ID'si gönderildiyse doğrula
+        if found_report_id:
+            cursor.execute("SELECT report_id, type FROM report WHERE report_id = %s;", (found_report_id,))
+            found = cursor.fetchone()
+            if not found: return jsonify({"message": f"found_report_id={found_report_id} bulunamadi."}), 404
+            if found["type"] != "found": return jsonify({"message": "found_report_id 'found' turunde degil."}), 400
+            
+        # SQL'e kayıt atıyoruz. (Eksik olan ID veritabanına otomatik NULL olarak yazılacak kanka)
         cursor.execute(
-            "INSERT INTO matches (lost_report_id, found_report_id, is_confirmed) VALUES (%s, %s, FALSE) RETURNING match_id;",
+            """INSERT INTO matches (lost_report_id, found_report_id, is_confirmed) 
+               VALUES (%s, %s, FALSE) RETURNING match_id;""",
             (lost_report_id, found_report_id)
         )
         mid = cursor.fetchone()['match_id']
@@ -317,7 +326,6 @@ def create_match():
     finally:
         cursor.close()
         conn.close()
-
 # 9. Spesifik İlan Detaylarını Çekme
 @app.route('/api/reports/<int:report_id>', methods=['GET'])
 def get_report_detail(report_id):
@@ -345,6 +353,86 @@ def get_report_detail(report_id):
         return jsonify(report), 200
     else:
         return jsonify({"message": "İlan bulunamadı."}), 404
+
+# 10. Giriş Yapmış Kullanıcının Eşleşme İsteklerini Listeleme (Matches Sekmesi İçin)
+@app.route('/api/matches/<int:user_id>', methods=['GET'])
+def get_user_matches(user_id):
+    conn = get_db_connection()
+    if conn is None: return jsonify({"message": "Veritabanı bağlantı hatası."}), 500
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Bu sorgu: Kullanıcıya ait olan ilanlarla (lost veya found) ilişkili tüm eşleşme isteklerini getirir.
+    sql = """
+        SELECT 
+            m.match_id, 
+            m.is_confirmed,
+            -- Kayıp ilanı bilgileri
+            m.lost_report_id,
+            i_lost.name AS lost_item_name,
+            u_lost.full_name AS lost_user_name,
+            u_lost.user_id AS lost_user_id,
+            -- Bulunan ilan bilgileri
+            m.found_report_id,
+            i_found.name AS found_item_name,
+            u_found.full_name AS found_user_name,
+            u_found.user_id AS found_user_id
+        FROM matches m
+        LEFT JOIN report r_lost ON m.lost_report_id = r_lost.report_id
+        LEFT JOIN item i_lost ON r_lost.item_id = i_lost.item_id
+        LEFT JOIN users u_lost ON r_lost.user_id = u_lost.user_id
+        
+        LEFT JOIN report r_found ON m.found_report_id = r_found.report_id
+        LEFT JOIN item i_found ON r_found.item_id = i_found.item_id
+        LEFT JOIN users u_found ON r_found.user_id = u_found.user_id
+        
+        WHERE r_lost.user_id = %s OR r_found.user_id = %s
+        ORDER BY m.match_id DESC;
+    """
+    
+    try:
+        cursor.execute(sql, (user_id, user_id))
+        matches = cursor.fetchall()
+        return jsonify(matches), 200
+    except Exception as e:
+        return jsonify({"message": f"Hata oluştu: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# 11. Eşleşme İsteğini Onaylama (is_confirmed alanını TRUE yapma)
+@app.route('/api/matches/<int:match_id>/confirm', methods=['POST'])
+def confirm_match(match_id):
+    conn = get_db_connection()
+    if conn is None: return jsonify({"message": "Veritabanı bağlantı hatası."}), 500
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Eşleşmeyi bul ve güncelle
+        cursor.execute(
+            "UPDATE matches SET is_confirmed = TRUE WHERE match_id = %s RETURNING match_id, lost_report_id, found_report_id;",
+            (match_id,)
+        )
+        row = cursor.fetchone()
+        
+        if not row:
+            return jsonify({"message": "Eşleşme kaydı bulunamadı."}), 404
+            
+        # --- BONUS MÜHENDİSLİK MANTIĞI ---
+        # Eşleşme kesinleştiği için ilgili ilanların durumunu (status) 'resolved' (çözüldü) yapıyoruz ki ana sayfada görünmesinler!
+        if row['lost_report_id']:
+            cursor.execute("UPDATE report SET status = 'resolved' WHERE report_id = %s;", (row['lost_report_id'],))
+        if row['found_report_id']:
+            cursor.execute("UPDATE report SET status = 'resolved' WHERE report_id = %s;", (row['found_report_id'],))
+            
+        conn.commit()
+        return jsonify({"message": "Eşleşme başarıyla onaylandı ve ilanlar kapatıldı.", "match_id": match_id}), 200
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"message": f"Hata oluştu: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 
 if __name__ == '__main__':
