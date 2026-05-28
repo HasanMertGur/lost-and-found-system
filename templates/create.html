@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>İlan Oluştur — FindIt</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="container navbar-inner">
+    <a href="/" class="nav-logo">Find<em>It</em></a>
+    <div class="nav-links">
+      <a href="/reports"  class="nav-link">İlanlar</a>
+      <a href="/create"   class="nav-link active">İlan Ver</a>
+      <a href="/messages" class="nav-link">Mesajlar</a>
+    </div>
+    <div class="nav-end" id="navAuth"></div>
+  </div>
+</nav>
+
+<div class="container" style="max-width:660px;">
+  <div class="page-head">
+    <h1>İlan Oluştur</h1>
+    <p>Kaybettiğin veya bulduğun eşyayı topluluğa bildir</p>
+  </div>
+
+  <div id="alertBox" class="alert alert-hidden"></div>
+
+  <form id="createForm" onsubmit="doCreate(event)">
+
+    <!-- Type -->
+    <div class="form-group mb-28">
+      <label class="form-label">İlan Türü</label>
+      <div class="type-toggle">
+        <button type="button" class="type-btn sel-lost" id="btnLost"  onclick="setType('lost')">
+          🔴&nbsp; Kayıp — Ben Kaybettim
+        </button>
+        <button type="button" class="type-btn"          id="btnFound" onclick="setType('found')">
+          🟢&nbsp; Bulundu — Ben Buldum
+        </button>
+      </div>
+    </div>
+
+    <!-- Category -->
+    <div class="form-group mb-28">
+      <label class="form-label">Kategori <span class="form-hint">(isteğe bağlı)</span></label>
+      <div class="cat-grid" id="catGrid">
+        <div class="flex-center" style="grid-column:1/-1;padding:20px;"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+    <!-- Fields -->
+    <div class="form-group mb-16">
+      <label class="form-label">Eşya Adı</label>
+      <input class="form-input" id="itemName" type="text"
+        placeholder="Örn: Siyah iPhone 14, Mavi deri cüzdan" required>
+    </div>
+
+    <div class="form-group mb-16">
+      <label class="form-label">Konum</label>
+      <input class="form-input" id="location" type="text"
+        placeholder="Örn: Kadıköy Meydanı, İstanbul">
+    </div>
+
+    <div class="form-group mb-28">
+      <label class="form-label">Açıklama</label>
+      <textarea class="form-textarea" id="description" style="min-height:120px;"
+        placeholder="Eşyayı tanımlayan detaylar: renk, marka, ayırt edici özellikler, kaybedildiği/bulunduğu saat…"></textarea>
+      <span class="form-hint">Ne kadar detaylı, o kadar iyi eşleşme.</span>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-lg btn-full" id="submitBtn">
+      İlanı Yayınla
+    </button>
+
+  </form>
+</div>
+
+<footer><div class="container"><p>© 2025 FindIt</p></div></footer>
+
+<script src="/static/js/api.js"></script>
+<script>
+auth.require();
+
+const ICONS = { 1:'📱', 2:'👕', 3:'👜', 4:'📄', 5:'🗝️', 6:'⌚', 7:'📦' };
+let selectedType = new URLSearchParams(location.search).get('type') || 'lost';
+let selectedCat  = null;
+
+async function loadCats() {
+  const grid = document.getElementById('catGrid');
+  try {
+    const cats = await api.categories();
+    grid.innerHTML = cats.map(c => `
+      <button type="button" class="cat-btn" data-id="${c.id}" onclick="pickCat(this,${c.id})">
+        <span class="cat-icon">${ICONS[c.id] || '📦'}</span>
+        ${escHtml(c.name)}
+      </button>`).join('');
+  } catch {
+    grid.innerHTML = `<p class="form-error">Kategoriler yüklenemedi.</p>`;
+  }
+}
+
+function setType(type) {
+  selectedType = type;
+  document.getElementById('btnLost').className  = 'type-btn' + (type === 'lost'  ? ' sel-lost'  : '');
+  document.getElementById('btnFound').className = 'type-btn' + (type === 'found' ? ' sel-found' : '');
+}
+
+function pickCat(btn, id) {
+  document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  selectedCat = (selectedCat === id) ? null : id; // toggle
+  if (selectedCat === null) btn.classList.remove('selected');
+}
+
+async function doCreate(e) {
+  e.preventDefault();
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true; btn.textContent = 'Yayınlanıyor…';
+  hideAlert('alertBox');
+
+  try {
+    const data = await api.createReport({
+      user_id:     auth.user.id,
+      category_id: selectedCat,
+      item_name:   document.getElementById('itemName').value,
+      description: document.getElementById('description').value || undefined,
+      type:        selectedType,
+      location:    document.getElementById('location').value || undefined,
+    });
+    showAlert('alertBox', `İlan yayınlandı! (#${data.report_id}) Yönlendiriliyor…`, 'success');
+    setTimeout(() => location.href = '/reports', 1200);
+  } catch (err) {
+    showAlert('alertBox', err.message);
+    btn.disabled = false; btn.textContent = 'İlanı Yayınla';
+  }
+}
+
+setType(selectedType);
+loadCats();
+</script>
+</body>
+</html>

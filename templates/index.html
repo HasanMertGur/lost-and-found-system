@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FindIt — Kayıp & Buluntu İlan Sistemi</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="container navbar-inner">
+    <a href="/" class="nav-logo">Find<em>It</em></a>
+    <div class="nav-links">
+      <a href="/reports"  class="nav-link">İlanlar</a>
+      <a href="/create"   class="nav-link">İlan Ver</a>
+      <a href="/messages" class="nav-link">Mesajlar</a>
+    </div>
+    <div class="nav-end" id="navAuth"></div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<div class="hero">
+  <div class="container">
+    <div class="hero-eyebrow">🔍 Topluluk destekli kayıp eşya platformu</div>
+    <h1 class="hero-title">
+      Kaybettiğini bul,<br><em>bulunanı iade et.</em>
+    </h1>
+    <p class="hero-sub">
+      Kayıp eşyalarını topluluğa duyur, bulunan eşyaları sahipleriyle buluştur.
+      Hızlı, kolay, güvenilir.
+    </p>
+    <div class="hero-cta">
+      <a href="/create?type=lost"  class="btn btn-primary btn-lg">Kayıp İlanı Ver</a>
+      <a href="/reports"           class="btn btn-outline btn-lg">İlanları Keşfet</a>
+    </div>
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="section-sm" style="background:var(--white);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+  <div class="container">
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-n" id="sTotal">—</div>
+        <div class="stat-l">Toplam İlan</div>
+      </div>
+      <div class="stat">
+        <div class="stat-n" id="sFound">—</div>
+        <div class="stat-l">Bulundu İlanı</div>
+      </div>
+      <div class="stat">
+        <div class="stat-n" id="sLost">—</div>
+        <div class="stat-l">Kayıp İlanı</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- How it works -->
+<div class="section">
+  <div class="container">
+    <div class="section-head text-center">
+      <h2>Nasıl Çalışır?</h2>
+      <p>Üç adımda kayıp eşyalarını bul ve sahiplerine kavuştur</p>
+    </div>
+    <div class="grid-3">
+      <div class="feature-card">
+        <div class="feature-icon">📝</div>
+        <div class="feature-title">İlan Oluştur</div>
+        <div class="feature-desc">Kaybettiğin ya da bulduğun eşyayı kategori, konum ve açıklama bilgileriyle birlikte sisteme ekle. Dakikalar içinde yayında.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔍</div>
+        <div class="feature-title">Ara & Filtrele</div>
+        <div class="feature-desc">Kayıp veya bulundu ilanlarını kategoriye, konuma, eşya adına göre filtrele. Eşyanı tanıyan biriyle eşleş.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🤝</div>
+        <div class="feature-title">İletişime Geç</div>
+        <div class="feature-desc">İlan sahibiyle doğrudan mesajlaşarak eşyanı geri al ya da sahiplerine teslim et. Topluluk seni bekliyor.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Recent reports -->
+<div class="section" style="background:var(--white);border-top:1px solid var(--border);">
+  <div class="container">
+    <div class="flex-between mb-24">
+      <div>
+        <h2 style="font-size:22px;font-weight:800;letter-spacing:-.3px;">Son İlanlar</h2>
+        <p class="text-muted text-sm mt-8">Topluluğun en güncel kayıp ve bulundu ilanları</p>
+      </div>
+      <a href="/reports" class="btn btn-outline btn-sm">Tümünü Gör →</a>
+    </div>
+    <div class="cards-grid" id="recentCards">
+      <div class="flex-center" style="grid-column:1/-1;padding:48px;">
+        <div class="spinner"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CTA -->
+<div class="section text-center">
+  <div class="container">
+    <h2 style="font-size:28px;font-weight:900;letter-spacing:-.4px;margin-bottom:12px;">
+      Topluluğa Katıl
+    </h2>
+    <p class="text-muted mb-24" style="font-size:16px;">
+      Ücretsiz hesap oluştur, ilanlarını yayınla, eşyalarını geri bul.
+    </p>
+    <a href="/auth?tab=register" class="btn btn-primary btn-lg">Ücretsiz Üye Ol</a>
+  </div>
+</div>
+
+<footer>
+  <div class="container">
+    <p>© 2025 FindIt &nbsp;·&nbsp; <a href="/reports">İlanlar</a> &nbsp;·&nbsp; <a href="/auth">Giriş Yap</a></p>
+  </div>
+</footer>
+
+<script src="/static/js/api.js"></script>
+<script>
+async function loadPage() {
+  try {
+    const reports = await api.reports();
+    document.getElementById('sTotal').textContent = reports.length;
+    document.getElementById('sFound').textContent = reports.filter(r => r.type === 'found').length;
+    document.getElementById('sLost').textContent  = reports.filter(r => r.type === 'lost').length;
+
+    const el = document.getElementById('recentCards');
+    const recent = reports.slice(0, 6);
+    if (!recent.length) {
+      el.innerHTML = `
+        <div class="empty">
+          <div class="empty-icon">📭</div>
+          <p>Henüz ilan yok. İlk ilanı sen oluştur!</p>
+          <a href="/create" class="btn btn-primary">İlan Oluştur</a>
+        </div>`;
+    } else {
+      el.innerHTML = recent.map(r => reportCard(r)).join('');
+    }
+  } catch (err) {
+    document.getElementById('recentCards').innerHTML =
+      `<p class="text-muted text-center" style="grid-column:1/-1;padding:32px;">İlanlar yüklenemedi: ${escHtml(err.message)}</p>`;
+  }
+}
+
+loadPage();
+</script>
+</body>
+</html>
