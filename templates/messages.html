@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesajlar — FindIt</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .msg-tabs { display:flex; border-bottom:1px solid var(--border); margin-bottom:20px; }
+  .msg-tab {
+    background:none; border:none; cursor:pointer; font-family:var(--font);
+    font-size:14px; font-weight:600; color:var(--text-3); padding:10px 20px;
+    border-bottom:2px solid transparent; margin-bottom:-1px;
+    transition:color var(--t), border-color var(--t);
+  }
+  .msg-tab.on { color:var(--accent); border-bottom-color:var(--accent); }
+  .unread-dot {
+    display:inline-block; width:7px; height:7px; background:var(--accent);
+    border-radius:50%; margin-left:6px; vertical-align:middle;
+  }
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="container navbar-inner">
+    <a href="/" class="nav-logo">Find<em>It</em></a>
+    <div class="nav-links">
+      <a href="/reports"  class="nav-link">İlanlar</a>
+      <a href="/create"   class="nav-link">İlan Ver</a>
+      <a href="/messages" class="nav-link active">Mesajlar</a>
+    </div>
+    <div class="nav-end" id="navAuth"></div>
+  </div>
+</nav>
+
+<div class="container" style="max-width:680px;">
+  <div class="page-head">
+    <h1>Mesajlar</h1>
+    <p>Gelen ve gönderilen mesajlarını görüntüle</p>
+  </div>
+
+  <!-- Compose -->
+  <div class="card mb-24">
+    <h3 style="font-size:15px;font-weight:700;margin-bottom:18px;">✉️ Yeni Mesaj</h3>
+    <div id="composeAlert" class="alert alert-hidden"></div>
+    <form onsubmit="doSend(event)">
+      <div class="form-group mb-16">
+        <label class="form-label">Alıcı Kullanıcı ID</label>
+        <input class="form-input" id="receiverId" type="number" min="1"
+               placeholder="Kullanıcı ID girin" required>
+      </div>
+      <div class="form-group mb-16">
+        <label class="form-label">Mesaj</label>
+        <textarea class="form-textarea" id="msgContent"
+                  placeholder="Mesajınızı buraya yazın…" required></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary" id="sendBtn">Gönder</button>
+    </form>
+  </div>
+
+  <!-- Tabs -->
+  <div class="msg-tabs">
+    <button class="msg-tab on" id="tabInbox"  onclick="switchTab('inbox')">
+      Gelen Kutusu <span id="unreadBadge" style="display:none" class="unread-dot"></span>
+    </button>
+    <button class="msg-tab"    id="tabSent"   onclick="switchTab('sent')">Gönderilenler</button>
+  </div>
+
+  <div id="msgContent2">
+    <div class="flex-center" style="padding:40px;"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<footer><div class="container"><p>© 2025 FindIt</p></div></footer>
+
+<script src="/static/js/api.js"></script>
+<script>
+auth.require();
+
+let currentTab = 'inbox';
+
+// Pre-fill compose from URL (?to=USER_ID&item=ITEM_NAME)
+const qs = new URLSearchParams(location.search);
+if (qs.get('to'))   document.getElementById('receiverId').value = qs.get('to');
+if (qs.get('item')) document.getElementById('msgContent').value =
+  `"${qs.get('item')}" ilanınızla ilgili mesaj göndermek istedim.`;
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tabInbox').className = 'msg-tab' + (tab === 'inbox' ? ' on' : '');
+  document.getElementById('tabSent').className  = 'msg-tab' + (tab === 'sent'  ? ' on' : '');
+  loadMessages();
+}
+
+async function doSend(e) {
+  e.preventDefault();
+  const userId  = auth.user.id;
+  const toId    = parseInt(document.getElementById('receiverId').value);
+
+  if (toId === userId) {
+    showAlert('composeAlert', 'Kendinize mesaj gönderemezsiniz.');
+    return;
+  }
+
+  const btn = document.getElementById('sendBtn');
+  btn.disabled = true; btn.textContent = 'Gönderiliyor…';
+  hideAlert('composeAlert');
+
+  try {
+    await api.sendMessage({
+      sender_id:   userId,
+      receiver_id: toId,
+      content:     document.getElementById('msgContent').value,
+    });
+    showAlert('composeAlert', 'Mesaj başarıyla gönderildi.', 'success');
+    document.getElementById('msgContent').value  = '';
+    document.getElementById('receiverId').value  = '';
+    if (currentTab === 'sent') loadMessages();
+  } catch (err) {
+    showAlert('composeAlert', err.message);
+  }
+  btn.disabled = false; btn.textContent = 'Gönder';
+}
+
+async function loadMessages() {
+  const el = document.getElementById('msgContent2');
+  el.innerHTML = `<div class="flex-center" style="padding:40px;"><div class="spinner"></div></div>`;
+
+  try {
+    if (currentTab === 'inbox') {
+      const msgs = await api.messages(auth.user.id);
+      const unread = msgs.filter(m => !m.is_read).length;
+      document.getElementById('unreadBadge').style.display = unread ? '' : 'none';
+
+      if (!msgs.length) {
+        el.innerHTML = `<div class="empty"><div class="empty-icon">📬</div><p>Gelen kutun boş.</p></div>`;
+        return;
+      }
+      el.innerHTML = msgs.map(m => `
+        <div class="msg-card ${m.is_read ? '' : 'unread'}" style="margin-bottom:10px;">
+          <div class="msg-from">
+            Gönderen: <strong>${escHtml(m.sender_name || 'Kullanıcı')}</strong>
+            <span style="color:var(--text-3);margin-left:4px;">#${m.sender_id}</span>
+          </div>
+          <div class="msg-content">${escHtml(m.content)}</div>
+          <div class="msg-footer">
+            <span class="msg-date">${fmtDate(m.date)}</span>
+            <button class="btn btn-ghost btn-sm" data-uid="${m.sender_id}" onclick="replyTo(this)">
+              Yanıtla
+            </button>
+          </div>
+        </div>`).join('');
+
+    } else {
+      const msgs = await api.sentMessages(auth.user.id);
+
+      if (!msgs.length) {
+        el.innerHTML = `<div class="empty"><div class="empty-icon">📤</div><p>Gönderilen mesaj yok.</p></div>`;
+        return;
+      }
+      el.innerHTML = msgs.map(m => `
+        <div class="msg-card" style="margin-bottom:10px;">
+          <div class="msg-from">
+            Alıcı: <strong>${escHtml(m.receiver_name || 'Kullanıcı')}</strong>
+            <span style="color:var(--text-3);margin-left:4px;">#${m.receiver_id}</span>
+          </div>
+          <div class="msg-content">${escHtml(m.content)}</div>
+          <div class="msg-footer">
+            <span class="msg-date">${fmtDate(m.date)}</span>
+          </div>
+        </div>`).join('');
+    }
+  } catch (err) {
+    el.innerHTML = `<p class="text-muted text-center" style="padding:32px;">
+      Yüklenemedi: ${escHtml(err.message)}
+    </p>`;
+  }
+}
+
+function replyTo(btn) {
+  document.getElementById('receiverId').value = btn.dataset.uid;
+  document.getElementById('msgContent').focus();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+loadMessages();
+</script>
+</body>
+</html>

@@ -1,392 +1,276 @@
-from flask import Flask, jsonify, request
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from werkzeug.security import generate_password_hash, check_password_hash
+import os
+import aiosqlite
+from contextlib import asynccontextmanager
+from typing import Optional
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-app = Flask(__name__)
+DB_PATH = os.path.join(os.path.dirname(__file__), "lost_found.db")
+
+SCHEMA = """
+PRAGMA journal_mode = WAL;
+
+CREATE TABLE IF NOT EXISTS users (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name    TEXT NOT NULL,
+    email        TEXT NOT NULL UNIQUE,
+    password     TEXT NOT NULL,
+    phone_number TEXT,
+    created_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS categories (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS reports (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    category_id INTEGER REFERENCES categories(id),
+    item_name   TEXT NOT NULL,
+    description TEXT,
+    type        TEXT NOT NULL CHECK(type IN ('lost','found')),
+    location    TEXT,
+    status      TEXT NOT NULL DEFAULT 'active',
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_id   INTEGER NOT NULL REFERENCES users(id),
+    receiver_id INTEGER NOT NULL REFERENCES users(id),
+    content     TEXT NOT NULL,
+    is_read     INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS matches (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    lost_report_id  INTEGER NOT NULL REFERENCES reports(id),
+    found_report_id INTEGER NOT NULL REFERENCES reports(id),
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+"""
+
+CATEGORIES = [
+    (1, "Elektronik"), (2, "Kiyafet & Aksesuar"), (3, "Canta & Cuzdan"),
+    (4, "Belge & Kimlik"), (5, "Anahtar"), (6, "Taki & Saat"), (7, "Diger"),
+]
 
 
-DB_URL = "postgresql://neondb_owner:npg_TAWSX45LkoFz@ep-round-mud-abh152jo.eu-west-2.aws.neon.tech/neondb?sslmode=require"
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.executescript(SCHEMA)
+        for cid, name in CATEGORIES:
+            await db.execute(
+                "INSERT OR IGNORE INTO categories(id,name) VALUES(?,?)", (cid, name)
+            )
+        await db.commit()
+    print(f"DB ready: {DB_PATH}")
+    yield
 
-def get_db_connection():
-    """
-    Bu fonksiyon, her veritabanı işlemi yapmak istediğimizde buluta gidip
-    kapıyı çalacak ve bağlantıyı açacak olan yardımcı fonksiyondur.
 
-    """
+app = FastAPI(title="Lost & Found API", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+# ── Page routes ───────────────────────────────────────────
+
+@app.get("/")
+async def home(): return FileResponse("templates/index.html")
+
+@app.get("/auth")
+async def auth_page(): return FileResponse("templates/auth.html")
+
+@app.get("/reports")
+async def reports_page(): return FileResponse("templates/reports.html")
+
+@app.get("/create")
+async def create_page(): return FileResponse("templates/create.html")
+
+@app.get("/messages")
+async def messages_page(): return FileResponse("templates/messages.html")
+
+
+# ── DB helpers ────────────────────────────────────────────
+
+def row_to_dict(row):
+    return {k: row[k] for k in row.keys()} if row else None
+
+
+async def fetch_one(query, params=()):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA foreign_keys = ON")
+        cur = await db.execute(query, params)
+        return await cur.fetchone()
+
+
+async def fetch_all(query, params=()):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA foreign_keys = ON")
+        cur = await db.execute(query, params)
+        return [row_to_dict(r) for r in await cur.fetchall()]
+
+
+async def execute(query, params=()):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA foreign_keys = ON")
+        cur = await db.execute(query, params)
+        await db.commit()
+        return cur.lastrowid
+
+
+# ── Pydantic models ───────────────────────────────────────
+
+class RegisterIn(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    phone_number: Optional[str] = None
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+class ReportIn(BaseModel):
+    user_id: int
+    category_id: Optional[int] = None
+    item_name: str
+    description: Optional[str] = None
+    type: str
+    location: Optional[str] = None
+
+class MessageIn(BaseModel):
+    sender_id: int
+    receiver_id: int
+    content: str
+
+class MatchIn(BaseModel):
+    lost_report_id: int
+    found_report_id: int
+
+
+# ── API routes ────────────────────────────────────────────
+
+@app.post("/api/register", status_code=201)
+async def register(body: RegisterIn):
     try:
-        conn = psycopg2.connect(DB_URL)
-        return conn
-    except Exception as e:
-        print(f"Veritabanına bağlanırken hata oluştu: {e}")
-        return None
+        uid = await execute(
+            "INSERT INTO users(full_name,email,password,phone_number) VALUES(?,?,?,?)",
+            (body.full_name.strip(), body.email.strip(), body.password, body.phone_number),
+        )
+        return {"message": "Kayit basarili.", "kullanici_id": uid}
+    except aiosqlite.IntegrityError:
+        raise HTTPException(409, "Bu e-posta zaten kayitli.")
 
-@app.route('/test-db', methods=['GET'])
-def test_db():
+
+@app.post("/api/login")
+async def login(body: LoginIn):
+    row = await fetch_one(
+        "SELECT * FROM users WHERE email=? AND password=?",
+        (body.email.strip(), body.password),
+    )
+    if not row:
+        raise HTTPException(401, "Gecersiz e-posta veya sifre.")
+    return {
+        "kullanici_id": row["id"],
+        "full_name": row["full_name"],
+        "email": row["email"],
+    }
+
+
+@app.get("/api/categories")
+async def get_categories():
+    return await fetch_all("SELECT * FROM categories ORDER BY id")
+
+
+@app.get("/api/reports")
+async def get_reports(type: Optional[str] = None, q: Optional[str] = None):
+    sql = """
+        SELECT r.id, r.item_name, r.description, r.type, r.location, r.status,
+               r.created_at AS date, r.category_id, c.name AS category_name,
+               r.user_id, u.full_name AS reported_by
+        FROM reports r
+        LEFT JOIN users      u ON u.id = r.user_id
+        LEFT JOIN categories c ON c.id = r.category_id
+        WHERE 1=1
     """
-    Tarayıcıdan 'http://127.0.0.1:5000/test-db' adresine gidildiğinde çalışır.
-    Veritabanının çalışıp çalışmadığını test eder.
-    """
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"durum": "Hata", "mesaj": "Veritabanı köprüsü kurulamadı!"}), 500
-    
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
-    try:
-        cursor.execute("SELECT version();")
-        db_version = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        
-        return jsonify({
-            "durum": "Başarılı",
-            "mesaj": "Bulut veritabanına başarıyla bağlandık!",
-            "veritabanı_versiyonu": db_version
-        }), 200
-        
-    except Exception as e:
-        cursor.close()
-        conn.close()
-        return jsonify({"durum": "Hata", "mesaj": str(e)}), 500
-
-@app.route('/register', methods=['POST'])
-def register_user():
-    """
-    Frontend'den gelen JSON verisini alıp veritabanındaki 'users' tablosuna kaydeder.
-    """
-    data = request.get_json()
-
-    full_name = data.get('full_name')
-    email = data.get('email')
-    password = data.get('password')
-    phone_number = data.get('phone_number', '')
-    
-    if not full_name or not email or not password:
-        return jsonify({"durum": "Hata", "mesaj": "Ad, E-posta ve Şifre zorunludur!"}), 400
-        
-    hashed_password = generate_password_hash(password)
-    
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"durum": "Hata", "mesaj": "Veritabanı bağlantısı koptu!"}), 500
-        
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
-    try:
-        insert_query = """
-            INSERT INTO users (full_name, email, password_hash, phone_number)
-            VALUES (%s, %s, %s, %s) 
-            RETURNING user_id, email, created_at;
-        """
-        
-        cursor.execute(insert_query, (full_name, email, hashed_password, phone_number))
-        
-        new_user = cursor.fetchone()
-        
-        conn.commit()
-
-        cursor.close()
-        conn.close()
-        
-        return jsonify({
-            "durum": "Başarılı",
-            "mesaj": "Kullanıcı başarıyla kaydedildi!",
-            "kullanici": new_user
-        }), 201
-        
-    except psycopg2.errors.UniqueViolation:
-        conn.rollback()
-        cursor.close()
-        conn.close()
-        return jsonify({"durum": "Hata", "mesaj": "Bu e-posta adresi sistemde zaten kayıtlı!"}), 400
-        
-    except Exception as e:
-        conn.rollback()
-        cursor.close()
-        conn.close()
-        return jsonify({"durum": "Hata", "mesaj": str(e)}), 500
+    params = []
+    if type in ("lost", "found"):
+        sql += " AND r.type=?"; params.append(type)
+    if q:
+        sql += " AND (r.item_name LIKE ? OR r.description LIKE ? OR r.location LIKE ?)"
+        params += [f"%{q}%", f"%{q}%", f"%{q}%"]
+    sql += " ORDER BY r.created_at DESC"
+    return await fetch_all(sql, params)
 
 
-@app.route('/login', methods=['POST'])
-def login_user():
-    """
-    Frontend'den gelen e-posta ve şifreyi kontrol edip sisteme giriş yaptırır.
-    """
-    data = request.get_json()
-    email = data.get('email')
-    password = data.get('password')
-    
-    if not email or not password:
-        return jsonify({"durum": "Hata", "mesaj": "E-posta ve şifre zorunludur!"}), 400
-        
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"durum": "Hata", "mesaj": "Veritabanı bağlantısı koptu!"}), 500
-        
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
-    try:
-
-        cursor.execute("SELECT user_id, full_name, password_hash, is_active FROM users WHERE email = %s;", (email,))
-        user = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        
-        if user is None:
-            return jsonify({"durum": "Hata", "mesaj": "Bu e-posta ile kayıtlı bir kullanıcı bulunamadı."}), 401
-            
-        if not user['is_active']:
-            return jsonify({"durum": "Hata", "mesaj": "Bu hesap dondurulmuş veya kapatılmış."}), 403
-            
-        if check_password_hash(user['password_hash'], password):
-            return jsonify({
-                "durum": "Başarılı",
-                "mesaj": f"Hoş geldin, {user['full_name']}!",
-                "kullanici_id": user['user_id']
-            }), 200
-        else:
-            return jsonify({"durum": "Hata", "mesaj": "Hatalı şifre girdiniz."}), 401
-            
-    except Exception as e:
-        cursor.close()
-        conn.close()
-        return jsonify({"durum": "Hata", "mesaj": str(e)}), 500
-
-@app.route('/create-report', methods=['POST'])
-def create_report():
-    """
-    Kullanıcıdan gelen eşya ve rapor bilgilerini alır.
-    Önce 'item' tablosuna, sonra 'report' tablosuna yazar.
-    """
-    data = request.get_json()
-    
-    user_id = data.get('user_id')           
-    category_id = data.get('category_id')   
-    item_name = data.get('item_name')       
-    description = data.get('description')  
-    report_type = data.get('type')          
-    location = data.get('location')         
-    
-    if not all([user_id, category_id, item_name, report_type, location]):
-        return jsonify({"durum": "Hata", "mesaj": "Eksik bilgi girdiniz. Lütfen zorunlu alanları doldurun."}), 400
-
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"durum": "Hata", "mesaj": "Veritabanı bağlantısı koptu!"}), 500
-        
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
-    try:
-        insert_item_query = """
-            INSERT INTO item (name, description, category_id)
-            VALUES (%s, %s, %s)
-            RETURNING item_id;
-        """
-        cursor.execute(insert_item_query, (item_name, description, category_id))
-        new_item = cursor.fetchone()
-        created_item_id = new_item['item_id']
-        insert_report_query = """
-            INSERT INTO report (type, location, date, user_id, item_id)
-            VALUES (%s, %s, NOW(), %s, %s)
-            RETURNING report_id, status;
-        """
-        cursor.execute(insert_report_query, (report_type, location, user_id, created_item_id))
-        new_report = cursor.fetchone()
-
-        conn.commit()
-        
-        cursor.close()
-        conn.close()
-        
-        return jsonify({
-            "durum": "Başarılı",
-            "mesaj": "İlan başarıyla oluşturuldu!",
-            "rapor_detaylari": new_report
-        }), 201
-
-    except Exception as e:
-        conn.rollback()
-        cursor.close()
-        conn.close()
-        return jsonify({"durum": "Hata", "mesaj": f"Rapor oluşturulurken hata meydana geldi: {str(e)}"}), 500
-
-@app.route('/reports', methods=['GET'])
-def get_reports():
-    """
-    Veritabanındaki tüm aktif ilanları (kayıp ve bulunan) 
-    eşya bilgileri ve oluşturan kişinin adıyla birlikte getirir.
-    """
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"durum": "Hata", "mesaj": "Veritabanı bağlantısı koptu!"}), 500
-        
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
-    try:
-        get_reports_query = """
-            SELECT 
-                r.report_id, r.type, r.location, r.date, r.status,
-                i.name AS item_name, i.description,
-                c.name AS category_name,
-                u.full_name AS reported_by
-            FROM report r
-            JOIN item i ON r.item_id = i.item_id
-            JOIN category c ON i.category_id = c.category_id
-            JOIN users u ON r.user_id = u.user_id
-            WHERE r.status = 'active'
-            ORDER BY r.date DESC; -- En yeni ilanlar en üstte görünsün
-        """
-        
-        cursor.execute(get_reports_query)
-        reports = cursor.fetchall()
-        
-        cursor.close()
-        conn.close()
-        
-        return jsonify({
-            "durum": "Başarılı",
-            "toplam_ilan": len(reports),
-            "ilanlar": reports
-        }), 200
-
-    except Exception as e:
-        cursor.close()
-        conn.close()
-        return jsonify({"durum": "Hata", "mesaj": str(e)}), 500
-
-@app.route('/send-message', methods=['POST'])
-def send_message():
-    """
-    Bir kullanıcının diğerine sistem üzerinden mesaj atmasını sağlar.
-    'message' tablosuna kayıt yapar.
-    """
-    data = request.get_json()
-    
-    sender_id = data.get('sender_id')
-    receiver_id = data.get('receiver_id')
-    content = data.get('content')
-    
-    if not all([sender_id, receiver_id, content]):
-        return jsonify({"durum": "Hata", "mesaj": "Gönderen, alıcı ve mesaj içeriği zorunludur!"}), 400
-
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"durum": "Hata", "mesaj": "Veritabanı bağlantısı koptu!"}), 500
-        
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
-    try:
-        insert_msg_query = """
-            INSERT INTO message (sender_id, receiver_id, content)
-            VALUES (%s, %s, %s)
-            RETURNING message_id, date;
-        """
-        cursor.execute(insert_msg_query, (sender_id, receiver_id, content))
-        new_message = cursor.fetchone()
-        conn.commit()
-        
-        cursor.close()
-        conn.close()
-        
-        return jsonify({
-            "durum": "Başarılı",
-            "mesaj": "Mesaj başarıyla iletildi!",
-            "mesaj_detayi": new_message
-        }), 201
-
-    except Exception as e:
-        conn.rollback()
-        cursor.close()
-        conn.close()
-        return jsonify({"durum": "Hata", "mesaj": f"Mesaj gönderilemedi: {str(e)}"}), 500
-
-@app.route('/messages/<int:user_id>', methods=['GET'])
-def get_messages(user_id):
-    """
-    Belirli bir kullanıcıya gelen tüm mesajları listeler.
-    Gönderenin adını da users tablosundan çekerek ekler.
-    """
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"durum": "Hata", "mesaj": "Veritabanı bağlantısı koptu!"}), 500
-        
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
-    try:
-        get_msgs_query = """
-            SELECT 
-                m.message_id, m.content, m.date,
-                u.full_name AS sender_name
-            FROM message m
-            JOIN users u ON m.sender_id = u.user_id
-            WHERE m.receiver_id = %s
-            ORDER BY m.date DESC;
-        """
-        
-        cursor.execute(get_msgs_query, (user_id,))
-        messages = cursor.fetchall()
-        
-        cursor.close()
-        conn.close()
-        
-        return jsonify({
-            "durum": "Başarılı",
-            "toplam_mesaj": len(messages),
-            "mesajlar": messages
-        }), 200
-
-    except Exception as e:
-        cursor.close()
-        conn.close()
-        return jsonify({"durum": "Hata", "mesaj": str(e)}), 500
+@app.post("/api/reports", status_code=201)
+async def create_report(body: ReportIn):
+    if body.type not in ("lost", "found"):
+        raise HTTPException(400, "type 'lost' veya 'found' olmali.")
+    if not await fetch_one("SELECT id FROM users WHERE id=?", (body.user_id,)):
+        raise HTTPException(404, "Kullanici bulunamadi.")
+    rid = await execute(
+        "INSERT INTO reports(user_id,category_id,item_name,description,type,location) VALUES(?,?,?,?,?,?)",
+        (body.user_id, body.category_id, body.item_name.strip(), body.description, body.type, body.location),
+    )
+    return {"message": "Ilan olusturuldu.", "report_id": rid}
 
 
-@app.route('/create-match', methods=['POST'])
-def create_match():
-    """
-    Bir kayıp ilanı ile bir bulunan ilanını eşleştirir.
-    Onay durumu varsayılan olarak FALSE (Beklemede) başlar.
-    """
-    data = request.get_json()
-    
-    lost_report_id = data.get('lost_report_id')
-    found_report_id = data.get('found_report_id')
-    
-    if not lost_report_id or not found_report_id:
-        return jsonify({"durum": "Hata", "mesaj": "Kayıp ve Bulunan rapor ID'leri zorunludur!"}), 400
+@app.post("/api/messages", status_code=201)
+async def send_message(body: MessageIn):
+    for uid, label in [(body.sender_id, "sender_id"), (body.receiver_id, "receiver_id")]:
+        if not await fetch_one("SELECT id FROM users WHERE id=?", (uid,)):
+            raise HTTPException(404, f"{label}={uid} bulunamadi.")
+    mid = await execute(
+        "INSERT INTO messages(sender_id,receiver_id,content) VALUES(?,?,?)",
+        (body.sender_id, body.receiver_id, body.content),
+    )
+    return {"message": "Mesaj gonderildi.", "message_id": mid}
 
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({"durum": "Hata", "mesaj": "Veritabanı bağlantısı koptu!"}), 500
-        
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
-    try:
-        insert_match_query = """
-            INSERT INTO matches (lost_report_id, found_report_id, is_confirmed)
-            VALUES (%s, %s, FALSE)
-            RETURNING match_id, is_confirmed;
-        """
-        cursor.execute(insert_match_query, (lost_report_id, found_report_id))
-        new_match = cursor.fetchone()
-        
-        conn.commit()
-        
-        cursor.close()
-        conn.close()
-        
-        return jsonify({
-            "durum": "Başarılı",
-            "mesaj": "Eşleşme başarıyla kaydedildi! Karşı tarafın onayı bekleniyor.",
-            "eslesme_detayi": new_match
-        }), 201
 
-    except Exception as e:
-        conn.rollback()
-        cursor.close()
-        conn.close()
-        return jsonify({"durum": "Hata", "mesaj": f"Eşleşme oluşturulamadı: {str(e)}"}), 500
+@app.get("/api/messages/{user_id}")
+async def get_messages(user_id: int, box: str = "inbox"):
+    if not await fetch_one("SELECT id FROM users WHERE id=?", (user_id,)):
+        raise HTTPException(404, "Kullanici bulunamadi.")
 
-if __name__ == '__main__':
-    app.run(debug=True)
+    if box == "sent":
+        return await fetch_all("""
+            SELECT m.id, m.content, m.created_at AS date, m.is_read,
+                   m.receiver_id, u.full_name AS receiver_name, m.sender_id
+            FROM messages m
+            LEFT JOIN users u ON u.id = m.receiver_id
+            WHERE m.sender_id = ?
+            ORDER BY m.created_at DESC
+        """, (user_id,))
+
+    return await fetch_all("""
+        SELECT m.id, m.content, m.created_at AS date, m.is_read,
+               m.sender_id, u.full_name AS sender_name, m.receiver_id
+        FROM messages m
+        LEFT JOIN users u ON u.id = m.sender_id
+        WHERE m.receiver_id = ?
+        ORDER BY m.created_at DESC
+    """, (user_id,))
+
+
+@app.post("/api/matches", status_code=201)
+async def create_match(body: MatchIn):
+    lost  = await fetch_one("SELECT id,type FROM reports WHERE id=?", (body.lost_report_id,))
+    found = await fetch_one("SELECT id,type FROM reports WHERE id=?", (body.found_report_id,))
+    if not lost:  raise HTTPException(404, f"lost_report_id={body.lost_report_id} bulunamadi.")
+    if not found: raise HTTPException(404, f"found_report_id={body.found_report_id} bulunamadi.")
+    if lost["type"]  != "lost":  raise HTTPException(400, "lost_report_id 'lost' turunde degil.")
+    if found["type"] != "found": raise HTTPException(400, "found_report_id 'found' turunde degil.")
+    mid = await execute(
+        "INSERT INTO matches(lost_report_id,found_report_id) VALUES(?,?)",
+        (body.lost_report_id, body.found_report_id),
+    )
+    return {"message": "Eslasme olusturuldu.", "match_id": mid}
