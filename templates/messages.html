@@ -1,190 +1,473 @@
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesajlar — FindIt</title>
-<link rel="stylesheet" href="/static/style.css">
+{% extends "base.html" %}
+
+{% block title %}Mesajlar — Kayıp Eşya Sistemi{% endblock %}
+
+{% block content %}
 <style>
-  .msg-tabs { display:flex; border-bottom:1px solid var(--border); margin-bottom:20px; }
-  .msg-tab {
-    background:none; border:none; cursor:pointer; font-family:var(--font);
-    font-size:14px; font-weight:600; color:var(--text-3); padding:10px 20px;
-    border-bottom:2px solid transparent; margin-bottom:-1px;
-    transition:color var(--t), border-color var(--t);
+  .chat-container {
+    display: flex;
+    background: var(--white);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    overflow: hidden;
+    height: 70vh;
+    min-height: 500px;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 2rem;
   }
-  .msg-tab.on { color:var(--accent); border-bottom-color:var(--accent); }
-  .unread-dot {
-    display:inline-block; width:7px; height:7px; background:var(--accent);
-    border-radius:50%; margin-left:6px; vertical-align:middle;
+
+  .chat-sidebar {
+    width: 280px;
+    border-right: 1px solid var(--border-color);
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chat-sidebar-header {
+    padding: 1.25rem 1rem;
+    font-weight: 700;
+    font-size: 1.1rem;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--white);
+  }
+
+  .contact-list {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .contact-item {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: background 0.2s;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .contact-item:hover {
+    background: var(--white);
+  }
+
+  .contact-item.active {
+    background: var(--white);
+    border-left: 4px solid var(--primary-color);
+  }
+
+  .contact-name {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .contact-id {
+    font-size: 0.8rem;
+    color: var(--text-3);
+  }
+
+  .chat-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-color);
+    /* Light gray behind bubbles */
+  }
+
+  .chat-header {
+    padding: 1rem 1.5rem;
+    background: var(--white);
+    border-bottom: 1px solid var(--border-color);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    min-height: 65px;
+  }
+
+  .chat-bubbles {
+    flex: 1;
+    padding: 1.5rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .bubble-wrap {
+    display: flex;
+    flex-direction: column;
+    max-width: 65%;
+  }
+
+  .bubble-wrap.mine {
+    align-self: flex-end;
+  }
+
+  .bubble-wrap.theirs {
+    align-self: flex-start;
+  }
+
+  .bubble {
+    padding: 0.8rem 1rem;
+    border-radius: 16px;
+    font-size: 0.95rem;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+
+  .bubble-wrap.mine .bubble {
+    background: var(--primary-color);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+
+  .bubble-wrap.theirs .bubble {
+    background: var(--white);
+    color: var(--text);
+    border-bottom-left-radius: 4px;
+    border: 1px solid var(--border-color);
+  }
+
+  .bubble-time {
+    font-size: 0.75rem;
+    opacity: 0.7;
+    margin-top: 4px;
+  }
+
+  .bubble-wrap.mine .bubble-time {
+    text-align: right;
+  }
+
+  .bubble-wrap.theirs .bubble-time {
+    text-align: left;
+    color: var(--text-3);
+  }
+
+  .chat-input-area {
+    padding: 1rem;
+    background: var(--white);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .chat-input-area input {
+    flex: 1;
+    padding: 0.8rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    outline: none;
+    font-size: 0.95rem;
+  }
+
+  .chat-input-area input:focus {
+    border-color: var(--primary-color);
   }
 </style>
-</head>
-<body>
 
-<nav class="navbar">
-  <div class="container navbar-inner">
-    <a href="/" class="nav-logo">Find<em>It</em></a>
-    <div class="nav-links">
-      <a href="/reports"  class="nav-link">İlanlar</a>
-      <a href="/create"   class="nav-link">İlan Ver</a>
-      <a href="/messages" class="nav-link active">Mesajlar</a>
+<div class="chat-container">
+  <!-- Sol Taraf: Kişiler / Konuşmalar -->
+  <div class="chat-sidebar">
+    <div class="chat-sidebar-header">Mesajlar</div>
+    <div class="contact-list" id="contactList">
+      <div style="padding:1rem;color:var(--text-3);text-align:center;">Yükleniyor...</div>
     </div>
-    <div class="nav-end" id="navAuth"></div>
-  </div>
-</nav>
-
-<div class="container" style="max-width:680px;">
-  <div class="page-head">
-    <h1>Mesajlar</h1>
-    <p>Gelen ve gönderilen mesajlarını görüntüle</p>
   </div>
 
-  <!-- Compose -->
-  <div class="card mb-24">
-    <h3 style="font-size:15px;font-weight:700;margin-bottom:18px;">✉️ Yeni Mesaj</h3>
-    <div id="composeAlert" class="alert alert-hidden"></div>
-    <form onsubmit="doSend(event)">
-      <div class="form-group mb-16">
-        <label class="form-label">Alıcı Kullanıcı ID</label>
-        <input class="form-input" id="receiverId" type="number" min="1"
-               placeholder="Kullanıcı ID girin" required>
-      </div>
-      <div class="form-group mb-16">
-        <label class="form-label">Mesaj</label>
-        <textarea class="form-textarea" id="msgContent"
-                  placeholder="Mesajınızı buraya yazın…" required></textarea>
-      </div>
-      <button type="submit" class="btn btn-primary" id="sendBtn">Gönder</button>
+  <!-- Sağ Taraf: Sohbet Ekranı -->
+  <div class="chat-main" id="chatMain" style="display:none;">
+    <div class="chat-header" id="chatHeader">Kişi Adı</div>
+    <div class="chat-bubbles" id="chatBubbles">
+      <!-- Baloncuklar buraya gelecek -->
+    </div>
+    <form class="chat-input-area" id="chatForm">
+      <input type="text" id="chatInput" placeholder="Bir mesaj yazın..." required autocomplete="off">
+      <button type="submit" class="btn btn-primary" style="border-radius: 20px; padding: 0.5rem 1.5rem;"
+        id="sendBtn">Gönder</button>
     </form>
   </div>
 
-  <!-- Tabs -->
-  <div class="msg-tabs">
-    <button class="msg-tab on" id="tabInbox"  onclick="switchTab('inbox')">
-      Gelen Kutusu <span id="unreadBadge" style="display:none" class="unread-dot"></span>
-    </button>
-    <button class="msg-tab"    id="tabSent"   onclick="switchTab('sent')">Gönderilenler</button>
-  </div>
-
-  <div id="msgContent2">
-    <div class="flex-center" style="padding:40px;"><div class="spinner"></div></div>
+  <!-- Sohbet seçilmemişse boş ekran -->
+  <div class="chat-main" id="emptyChat" style="justify-content:center; align-items:center; color:var(--text-3);">
+    <div style="text-align:center;">
+      <div style="font-size:3rem; margin-bottom:1rem;">💬</div>
+      <h3>Sohbet başlatmak için birini seçin</h3>
+    </div>
   </div>
 </div>
 
-<footer><div class="container"><p>© 2025 FindIt</p></div></footer>
-
-<script src="/static/js/api.js"></script>
 <script>
-auth.require();
+  let user = null;
+  let conversations = {}; // { otherUserId: { id, name, messages: [] } }
+  let activeChatId = null;
 
-let currentTab = 'inbox';
+  document.addEventListener("DOMContentLoaded", () => {
+    const userStr = localStorage.getItem('user');
+    if (!userStr) {
+      alert('Mesajları görmek için giriş yapmalısınız!');
+      window.location.href = '/auth';
+      return;
+    }
+    user = JSON.parse(userStr);
+    loadAllMessages();
 
-// Pre-fill compose from URL (?to=USER_ID&item=ITEM_NAME)
-const qs = new URLSearchParams(location.search);
-if (qs.get('to'))   document.getElementById('receiverId').value = qs.get('to');
-if (qs.get('item')) document.getElementById('msgContent').value =
-  `"${qs.get('item')}" ilanınızla ilgili mesaj göndermek istedim.`;
+    document.getElementById('chatForm').addEventListener('submit', sendMessage);
+  });
 
-function switchTab(tab) {
-  currentTab = tab;
-  document.getElementById('tabInbox').className = 'msg-tab' + (tab === 'inbox' ? ' on' : '');
-  document.getElementById('tabSent').className  = 'msg-tab' + (tab === 'sent'  ? ' on' : '');
-  loadMessages();
+  async function loadAllMessages() {
+    try {
+      // Hem gelen hem giden mesajları çek!
+      const [inRes, outRes] = await Promise.all([
+        fetch(`/api/messages/${user.kullanici_id}?box=inbox`),
+        fetch(`/api/messages/${user.kullanici_id}?box=sent`)
+      ]);
+
+      const inMsgs = inRes.ok ? await inRes.json() : [];
+      const outMsgs = outRes.ok ? await outRes.json() : [];
+
+      let allMessages = [];
+
+      // Gelen mesajları düzenle (Karşı taraf SENDER'dır)
+      if (Array.isArray(inMsgs)) {
+        allMessages.push(...inMsgs.map(m => ({ ...m, isMine: false, otherId: m.sender_id, otherName: m.sender_name })));
+      }
+      // Giden mesajları düzenle (Karşı taraf RECEIVER'dır)
+      if (Array.isArray(outMsgs)) {
+        allMessages.push(...outMsgs.map(m => ({ ...m, isMine: true, otherId: m.receiver_id, otherName: m.receiver_name })));
+      }
+
+      // Tarihe göre eskiden yeniye doğru sırala
+      allMessages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+      conversations = {};
+      allMessages.forEach(m => {
+        const oid = m.otherId;
+        if (!conversations[oid]) {
+          conversations[oid] = { id: oid, name: m.otherName || 'Bilinmeyen Kullanıcı', messages: [] };
+        }
+        conversations[oid].messages.push(m);
+      });
+
+      // URL'den direkt mesaj atan birisi var mı? (?to=3)
+      const qs = new URLSearchParams(location.search);
+      const targetId = qs.get('to');
+      if (targetId) {
+        const tid = parseInt(targetId);
+        if (!conversations[tid]) {
+          conversations[tid] = { id: tid, name: "Kullanıcı " + tid, messages: [] };
+        }
+        activeChatId = tid;
+      } else if (!activeChatId && Object.keys(conversations).length > 0) {
+        // Herhangi bir chat yoksa listedeki ilk kişiyi aç
+        activeChatId = parseInt(Object.keys(conversations)[0]);
+      }
+
+      renderSidebar();
+      if (activeChatId) openChat(activeChatId);
+
+    } catch (err) {
+      console.error("Mesajlar çekilirken hata:", err);
+      document.getElementById('contactList').innerHTML = '<div style="padding:1rem;color:red;">Bağlantı hatası</div>';
+    }
+  }
+
+  function renderSidebar() {
+    const list = document.getElementById('contactList');
+    if (Object.keys(conversations).length === 0) {
+      list.innerHTML = '<div style="padding:1.5rem; text-align:center; color:var(--text-3); font-size:0.9rem;">Hiç mesajınız yok.</div>';
+      return;
+    }
+
+    list.innerHTML = '';
+    Object.values(conversations).forEach(conv => {
+      const div = document.createElement('div');
+      div.className = 'contact-item' + (conv.id === activeChatId ? ' active' : '');
+      div.onclick = () => openChat(conv.id);
+
+      // Konuşmadaki son mesajın gösterimi
+      let lastMsgText = "Henüz mesaj yok.";
+      if (conv.messages.length > 0) {
+        const lastMsg = conv.messages[conv.messages.length - 1];
+        lastMsgText = (lastMsg.isMine ? "Siz: " : "") + lastMsg.content.substring(0, 25) + "...";
+      }
+
+      div.innerHTML = `
+                <div class="contact-name">${conv.name || ('Kullanıcı ' + conv.id)}</div>
+                <div class="contact-id">${lastMsgText}</div>
+            `;
+      list.appendChild(div);
+    });
+  }
+
+  function openChat(otherId) {
+    activeChatId = otherId;
+    renderSidebar(); // Sidebar'daki "active" class'ını güncelle
+
+    document.getElementById('emptyChat').style.display = 'none';
+    document.getElementById('chatMain').style.display = 'flex';
+
+    const chatHeader = document.getElementById('chatHeader');
+    const chatBubbles = document.getElementById('chatBubbles');
+    const conv = conversations[otherId];
+
+    chatHeader.textContent = conv.name || ('Kullanıcı ' + conv.id);
+    chatBubbles.innerHTML = '';
+
+    if (conv.messages.length === 0) {
+      chatBubbles.innerHTML = '<div style="text-align:center;color:var(--text-3);margin-top:2rem;">Buraya yazarak ilk mesajı gönderin!</div>';
+    }
+
+    conv.messages.forEach(msg => {
+      const wrap = document.createElement('div');
+      wrap.className = 'bubble-wrap ' + (msg.isMine ? 'mine' : 'theirs');
+
+      const d = new Date(msg.created_at);
+      const time = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+
+      wrap.innerHTML = `
+                <div class="bubble">${msg.content}</div>
+                <span class="bubble-time">${time}</span>
+            `;
+      chatBubbles.appendChild(wrap);
+    });
+
+    // Scrolu en aşağıya kaydır
+    chatBubbles.scrollTop = chatBubbles.scrollHeight;
+    document.getElementById('chatInput').focus();
+  }
+
+  async function sendMessage(e) {
+    e.preventDefault();
+    const input = document.getElementById('chatInput');
+    const btn = document.getElementById('sendBtn');
+    const content = input.value.trim();
+
+    if (!content || !activeChatId) return;
+
+    btn.disabled = true;
+
+    try {
+      const res = await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sender_id: user.kullanici_id,
+          receiver_id: activeChatId,
+          content: content
+        })
+      });
+
+      if (res.ok) {
+        input.value = '';
+        // Mesajı başarıyla attık, arayüzü tekrar yükleyelim (anında görsün)
+        await loadAllMessages();
+      } else {
+        alert('Mesaj gönderilemedi.');
+      }
+    } catch (err) {
+      alert('Sunucu hatası.');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+</script>
+{% endblock %}
+
+if (toId === userId) {
+showAlert('composeAlert', 'Kendinize mesaj gönderemezsiniz.');
+return;
 }
 
-async function doSend(e) {
-  e.preventDefault();
-  const userId  = auth.user.id;
-  const toId    = parseInt(document.getElementById('receiverId').value);
+const btn = document.getElementById('sendBtn');
+btn.disabled = true; btn.textContent = 'Gönderiliyor…';
+hideAlert('composeAlert');
 
-  if (toId === userId) {
-    showAlert('composeAlert', 'Kendinize mesaj gönderemezsiniz.');
-    return;
-  }
-
-  const btn = document.getElementById('sendBtn');
-  btn.disabled = true; btn.textContent = 'Gönderiliyor…';
-  hideAlert('composeAlert');
-
-  try {
-    await api.sendMessage({
-      sender_id:   userId,
-      receiver_id: toId,
-      content:     document.getElementById('msgContent').value,
-    });
-    showAlert('composeAlert', 'Mesaj başarıyla gönderildi.', 'success');
-    document.getElementById('msgContent').value  = '';
-    document.getElementById('receiverId').value  = '';
-    if (currentTab === 'sent') loadMessages();
-  } catch (err) {
-    showAlert('composeAlert', err.message);
-  }
-  btn.disabled = false; btn.textContent = 'Gönder';
+try {
+await api.sendMessage({
+sender_id: userId,
+receiver_id: toId,
+content: document.getElementById('msgContent').value,
+});
+showAlert('composeAlert', 'Mesaj başarıyla gönderildi.', 'success');
+document.getElementById('msgContent').value = '';
+document.getElementById('receiverId').value = '';
+if (currentTab === 'sent') loadMessages();
+} catch (err) {
+showAlert('composeAlert', err.message);
+}
+btn.disabled = false; btn.textContent = 'Gönder';
 }
 
 async function loadMessages() {
-  const el = document.getElementById('msgContent2');
-  el.innerHTML = `<div class="flex-center" style="padding:40px;"><div class="spinner"></div></div>`;
+const el = document.getElementById('msgContent2');
+el.innerHTML = `<div class="flex-center" style="padding:40px;">
+  <div class="spinner"></div>
+</div>`;
 
-  try {
-    if (currentTab === 'inbox') {
-      const msgs = await api.messages(auth.user.id);
-      const unread = msgs.filter(m => !m.is_read).length;
-      document.getElementById('unreadBadge').style.display = unread ? '' : 'none';
+try {
+if (currentTab === 'inbox') {
+const msgs = await api.messages(auth.user.id);
+const unread = msgs.filter(m => !m.is_read).length;
+document.getElementById('unreadBadge').style.display = unread ? '' : 'none';
 
-      if (!msgs.length) {
-        el.innerHTML = `<div class="empty"><div class="empty-icon">📬</div><p>Gelen kutun boş.</p></div>`;
-        return;
-      }
-      el.innerHTML = msgs.map(m => `
-        <div class="msg-card ${m.is_read ? '' : 'unread'}" style="margin-bottom:10px;">
-          <div class="msg-from">
-            Gönderen: <strong>${escHtml(m.sender_name || 'Kullanıcı')}</strong>
-            <span style="color:var(--text-3);margin-left:4px;">#${m.sender_id}</span>
-          </div>
-          <div class="msg-content">${escHtml(m.content)}</div>
-          <div class="msg-footer">
-            <span class="msg-date">${fmtDate(m.date)}</span>
-            <button class="btn btn-ghost btn-sm" data-uid="${m.sender_id}" onclick="replyTo(this)">
-              Yanıtla
-            </button>
-          </div>
-        </div>`).join('');
+if (!msgs.length) {
+el.innerHTML = `<div class="empty">
+  <div class="empty-icon">📬</div>
+  <p>Gelen kutun boş.</p>
+</div>`;
+return;
+}
+el.innerHTML = msgs.map(m => `
+<div class="msg-card ${m.is_read ? '' : 'unread'}" style="margin-bottom:10px;">
+  <div class="msg-from">
+    Gönderen: <strong>${escHtml(m.sender_name || 'Kullanıcı')}</strong>
+    <span style="color:var(--text-3);margin-left:4px;">#${m.sender_id}</span>
+  </div>
+  <div class="msg-content">${escHtml(m.content)}</div>
+  <div class="msg-footer">
+    <span class="msg-date">${fmtDate(m.date)}</span>
+    <button class="btn btn-ghost btn-sm" data-uid="${m.sender_id}" onclick="replyTo(this)">
+      Yanıtla
+    </button>
+  </div>
+</div>`).join('');
 
-    } else {
-      const msgs = await api.sentMessages(auth.user.id);
+} else {
+const msgs = await api.sentMessages(auth.user.id);
 
-      if (!msgs.length) {
-        el.innerHTML = `<div class="empty"><div class="empty-icon">📤</div><p>Gönderilen mesaj yok.</p></div>`;
-        return;
-      }
-      el.innerHTML = msgs.map(m => `
-        <div class="msg-card" style="margin-bottom:10px;">
-          <div class="msg-from">
-            Alıcı: <strong>${escHtml(m.receiver_name || 'Kullanıcı')}</strong>
-            <span style="color:var(--text-3);margin-left:4px;">#${m.receiver_id}</span>
-          </div>
-          <div class="msg-content">${escHtml(m.content)}</div>
-          <div class="msg-footer">
-            <span class="msg-date">${fmtDate(m.date)}</span>
-          </div>
-        </div>`).join('');
-    }
-  } catch (err) {
-    el.innerHTML = `<p class="text-muted text-center" style="padding:32px;">
-      Yüklenemedi: ${escHtml(err.message)}
-    </p>`;
-  }
+if (!msgs.length) {
+el.innerHTML = `<div class="empty">
+  <div class="empty-icon">📤</div>
+  <p>Gönderilen mesaj yok.</p>
+</div>`;
+return;
+}
+el.innerHTML = msgs.map(m => `
+<div class="msg-card" style="margin-bottom:10px;">
+  <div class="msg-from">
+    Alıcı: <strong>${escHtml(m.receiver_name || 'Kullanıcı')}</strong>
+    <span style="color:var(--text-3);margin-left:4px;">#${m.receiver_id}</span>
+  </div>
+  <div class="msg-content">${escHtml(m.content)}</div>
+  <div class="msg-footer">
+    <span class="msg-date">${fmtDate(m.date)}</span>
+  </div>
+</div>`).join('');
+}
+} catch (err) {
+el.innerHTML = `<p class="text-muted text-center" style="padding:32px;">
+  Yüklenemedi: ${escHtml(err.message)}
+</p>`;
+}
 }
 
 function replyTo(btn) {
-  document.getElementById('receiverId').value = btn.dataset.uid;
-  document.getElementById('msgContent').focus();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+document.getElementById('receiverId').value = btn.dataset.uid;
+document.getElementById('msgContent').focus();
+window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 loadMessages();
 </script>
 </body>
+
 </html>

@@ -1,12 +1,35 @@
 import os
-from flask import Flask, jsonify, request
-from flask_cors import CORS  # React'ın güvenliğe takılmadan istek atabilmesi için şart!
+from flask import Flask, jsonify, request, render_template
+from flask_cors import CORS
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # HTML ve statik klasör ayarlarını tamamen uçurduk, sadeleştirdik.
 app = Flask(__name__)
+app.secret_key = "super_gizli_anahtar" # Flash mesajları ve (gerekirse) session için gerekli
+
+# ── HTML SAYFA YÖNLENDİRMELERİ ───────────────────────────────────────
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/auth')
+def auth():
+    return render_template('auth.html')
+
+@app.route('/reports')
+def reports_page():
+    return render_template('reports.html')
+
+@app.route('/create')
+def create_page():
+    return render_template('create.html')
+
+@app.route('/messages')
+def messages_page():
+    return render_template('messages.html')
 
 # React'ın yerel sunucusundan (5173 portu) gelen tüm veri isteklerine tam yetki verdik
 CORS(app, resources={r"/api/*": {"origins": "http://localhost:5173"}})
