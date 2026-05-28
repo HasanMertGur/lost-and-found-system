@@ -1,17 +1,18 @@
 import os
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request
+from flask_cors import CORS  # React'ın güvenliğe takılmadan istek atabilmesi için şart!
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 
-app = Flask(
-    __name__,
-    template_folder="templates", # HTML dosyalarının aranacağı klasör
-    static_folder="static"       # CSS/JS dosyalarının aranacağı klasör
-)
+# HTML ve statik klasör ayarlarını tamamen uçurduk, sadeleştirdik.
+app = Flask(__name__)
+
+# React'ın yerel sunucusundan (5173 portu) gelen tüm veri isteklerine tam yetki verdik
+CORS(app, resources={r"/api/*": {"origins": "http://localhost:5173"}})
 
 # ── BULUT VERİTABANI BAĞLANTI BİLGİSİ ──────────────────────────────────
-DB_URL = "postgresql://neondb_owner:BURAYA_KENDİ_ŞİFREN_GELECEK@ep-cool-water-a2b3c4.eu-central-1.aws.neon.tech/neondb?sslmode=require"
+DB_URL = "postgresql://neondb_owner:npg_TAWSX45LkoFz@ep-round-mud-abh152jo.eu-west-2.aws.neon.tech/neondb?sslmode=require"
 
 def get_db_connection():
     try:
@@ -21,33 +22,10 @@ def get_db_connection():
         print(f"Veritabanı bağlantı hatası: {e}")
         return None
 
-# ── SAYFA YÖNLENDİRMELERİ (PAGE ROUTES) ──────────────────────────────────
-# Arkadaşının frontend şablonlarını (HTML) ekrana getiren kısım
 
-@app.route('/')
-def home(): 
-    return render_template("index.html")
+# ── API UÇ NOKTALARI (SADECE SAF JSON VERİ YAPILARI ÜRETİR) ─────────────────
 
-@app.route('/auth')
-def auth_page(): 
-    return render_template("auth.html")
-
-@app.route('/reports')
-def reports_page(): 
-    return render_template("reports.html")
-
-@app.route('/create')
-def create_page(): 
-    return render_template("create.html")
-
-@app.route('/messages')
-def messages_page(): 
-    return render_template("messages.html")
-
-
-# ── API UÇ NOKTALARI (API ROUTES) ────────────────────────────────────────
-
-# 1. Kullanıcı Kayıt (Şifre Hash'leme Korunuyor)
+# 1. Kullanıcı Kayıt
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -81,7 +59,7 @@ def register():
         cursor.close()
         conn.close()
 
-# 2. Kullanıcı Giriş (Güvenli Şifre Kontrolü Çarpıştırması)
+# 2. Kullanıcı Giriş
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -107,7 +85,7 @@ def login():
     else:
         return jsonify({"message": "Gecersiz e-posta veya sifre."}), 401
 
-# 3. Kategorileri Listeleme Yardımcısı (Arkadaşının eklediği yeni API)
+# 3. Kategorileri Listeleme Yardımcısı
 @app.route('/api/categories', methods=['GET'])
 def get_categories():
     conn = get_db_connection()
@@ -124,7 +102,6 @@ def get_categories():
 # 4. Dinamik Arama ve Filtreleme Destekli İlan Listeleme
 @app.route('/api/reports', methods=['GET'])
 def get_reports():
-    # URL parametrelerini yakalama (Örn: /api/reports?type=lost&q=cüzdan)
     report_type = request.args.get('type')
     search_query = request.args.get('q')
     
@@ -132,7 +109,6 @@ def get_reports():
     if conn is None: return jsonify({"message": "Veritabanı bağlantı hatası."}), 500
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
-    # ER Diyagramındaki 1:1 Item-Report ilişkisini koruyarak JOIN yapıyoruz
     sql = """
         SELECT r.report_id AS id, i.name AS item_name, i.description, r.type, r.location, r.status,
                r.date AS created_at, i.category_id, c.name AS category_name,
@@ -145,7 +121,6 @@ def get_reports():
     """
     params = []
     
-    # Arkadaşının eklediği dinamik filtreleme mantığı:
     if report_type in ("lost", "found"):
         sql += " AND r.type = %s"
         params.append(report_type)
@@ -164,10 +139,12 @@ def get_reports():
     conn.close()
     return jsonify(reports), 200
 
-# 5. İlan Oluşturma (Güvenli Çift Tablo İşlemi / Transaction Korunuyor)
+# 5. İlan Oluşturma
 @app.route('/api/reports', methods=['POST'])
 def create_report():
     data = request.get_json()
+    print("⚡ [FLASK] React'tan bir POST isteği geldi! Alınan Veri:", data) # Terminalde görmek için ekledik
+    
     user_id = data.get('user_id')
     category_id = data.get('category_id')
     item_name = data.get('item_name', '').strip()
@@ -176,26 +153,27 @@ def create_report():
     location = data.get('location')
     
     if report_type not in ("lost", "found"):
+        print("❌ [FLASK] Hata: İlan türü 'lost' ya da 'found' değil!")
         return jsonify({"message": "type 'lost' veya 'found' olmali."}), 400
         
     conn = get_db_connection()
-    if conn is None: return jsonify({"message": "Veritabanı bağlantı hatası."}), 500
+    if conn is None: 
+        print("❌ [FLASK] Hata: Veritabanı bağlantısı kurulamadı!")
+        return jsonify({"message": "Veritabanı bağlantı hatası."}), 500
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     try:
-        # Kullanıcı kontrolü
         cursor.execute("SELECT user_id FROM users WHERE user_id = %s;", (user_id,))
         if not cursor.fetchone():
+            print(f"❌ [FLASK] Hata: user_id {user_id} veritabanında yok!")
             return jsonify({"message": "Kullanici bulunamadi."}), 404
             
-        # 1. Adım: Item tablosuna ekleme
         cursor.execute(
             "INSERT INTO item (name, description, category_id) VALUES (%s, %s, %s) RETURNING item_id;",
             (item_name, description, category_id)
         )
         item_id = cursor.fetchone()['item_id']
         
-        # 2. Adım: Report tablosuna ekleme
         cursor.execute(
             "INSERT INTO report (type, location, date, user_id, item_id) VALUES (%s, %s, NOW(), %s, %s) RETURNING report_id;",
             (report_type, location, user_id, item_id)
@@ -203,14 +181,15 @@ def create_report():
         rid = cursor.fetchone()['report_id']
         
         conn.commit()
+        print(f"✅ [FLASK] İlan başarıyla DB'ye yazıldı! Rapor ID: {rid}")
         return jsonify({"message": "Ilan olusturuldu.", "report_id": rid}), 201
     except Exception as e:
         conn.rollback()
+        print("❌ [FLASK] SQL Hatası oluştu:", str(e))
         return jsonify({"message": f"Hata oluştu: {str(e)}"}), 500
     finally:
         cursor.close()
         conn.close()
-
 # 6. Mesaj Gönderme
 @app.route('/api/messages', methods=['POST'])
 def send_message():
@@ -224,7 +203,6 @@ def send_message():
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     try:
-        # Gönderici ve alıcı kontrolü
         for uid, label in [(sender_id, "sender_id"), (receiver_id, "receiver_id")]:
             cursor.execute("SELECT user_id FROM users WHERE user_id = %s;", (uid,))
             if not cursor.fetchone():
@@ -241,10 +219,10 @@ def send_message():
         cursor.close()
         conn.close()
 
-# 7. Gelen Kutusu (Inbox) ve Giden Kutusu (Sent) Filtrelemeli Mesaj Çekme
+# 7. Gelen Kutusu (Inbox) ve Giden Kutusu (Sent) Mesaj Çekme
 @app.route('/api/messages/<int:user_id>', methods=['GET'])
 def get_messages(user_id):
-    box = request.args.get('box', 'inbox') # Varsayılan olarak gelen kutusu
+    box = request.args.get('box', 'inbox')
     
     conn = get_db_connection()
     if conn is None: return jsonify({"message": "Veritabanı bağlantı hatası."}), 500
@@ -257,7 +235,6 @@ def get_messages(user_id):
         return jsonify({"message": "Kullanici bulunamadi."}), 404
         
     if box == "sent":
-        # Giden kutusu sorgusu
         sql = """
             SELECT m.message_id AS id, m.content, m.date AS created_at,
                    m.receiver_id, u.full_name AS receiver_name, m.sender_id
@@ -267,7 +244,6 @@ def get_messages(user_id):
             ORDER BY m.date DESC;
         """
     else:
-        # Gelen kutusu sorgusu
         sql = """
             SELECT m.message_id AS id, m.content, m.date AS created_at,
                    m.sender_id, u.full_name AS sender_name, m.receiver_id
@@ -319,14 +295,13 @@ def create_match():
         cursor.close()
         conn.close()
 
-# 9. Spesifik İlan Detaylarını Çekme (ItemDetail sayfası için)
+# 9. Spesifik İlan Detaylarını Çekme
 @app.route('/api/reports/<int:report_id>', methods=['GET'])
 def get_report_detail(report_id):
     conn = get_db_connection()
     if conn is None: return jsonify({"message": "Veritabanı bağlantı hatası."}), 500
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
-    # Sadece istenen ID'ye sahip ilanı getir
     sql = """
         SELECT r.report_id AS id, i.name AS item_name, i.description, r.type, r.location, r.status,
                r.date AS created_at, i.category_id, c.name AS category_name,
@@ -350,4 +325,5 @@ def get_report_detail(report_id):
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Flask sunucumuzu 5000 portunda asıl veri motoru olarak başlattık
+    app.run(debug=True, port=5000)

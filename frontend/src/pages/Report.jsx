@@ -3,10 +3,51 @@ import { Camera, MapPin, Tag, AlignLeft, Send } from 'lucide-react';
 
 export default function Report() {
    const [reportType, setReportType] = useState('lost');
-
+   const [itemName, setItemName] = useState('');
+   const [categoryId, setCategoryId] = useState('1'); // Tam olarak bu satırın böyle olduğundan emin ol
+   const [location, setLocation] = useState('');
+   const [description, setDescription] = useState('');
+   const [categories, setCategories] = useState([]);
+   
    const handleSubmit = (e) => {
       e.preventDefault();
-      alert('Form submitted! (Mocked)');
+      console.log("1. Butona basıldı, payload hazırlanıyor...");
+      
+      const payload = {
+         user_id: 1, 
+         category_id: parseInt(categoryId),
+         item_name: itemName,
+         description: description,
+         type: reportType,
+         location: location
+      };
+
+      console.log("2. Flask'a gönderilecek veri:", payload);
+
+      fetch('http://127.0.0.1:5000/api/reports', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify(payload)
+      })
+      .then(res => {
+         console.log("3. Flask sunucusundan yanıt kodu geldi:", res.status);
+         return res.json();
+      })
+      .then(data => {
+         console.log("4. Flask'tan gelen ham JSON yanıtı:", data);
+         if (data.report_id || data.message === "Ilan olusturuldu.") {
+             alert('Harika! İlan başarıyla veritabanına kaydedildi kanka.');
+             setItemName('');
+             setLocation('');
+             setDescription('');
+         } else {
+             alert('Bir hata oluştu: ' + data.message);
+         }
+      })
+      .catch(err => {
+         console.error("🚨 BAĞLANTI HATASI: Flask açık olmayabilir veya CORS engeli var!", err);
+         alert("Backend sunucusuna bağlanılamadı. app.py açık mı?");
+      });
    };
 
    return (
