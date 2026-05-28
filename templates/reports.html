@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>İlanlar — FindIt</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="container navbar-inner">
+    <a href="/" class="nav-logo">Find<em>It</em></a>
+    <div class="nav-links">
+      <a href="/reports"  class="nav-link active">İlanlar</a>
+      <a href="/create"   class="nav-link">İlan Ver</a>
+      <a href="/messages" class="nav-link">Mesajlar</a>
+    </div>
+    <div class="nav-end" id="navAuth"></div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-head">
+    <h1>İlanlar</h1>
+    <p>Kayıp ve buluntu ilanlarını keşfet, eşyaları sahipleriyle buluştur</p>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="flex gap-12 mb-24" style="flex-wrap:wrap;align-items:center;">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input id="searchInput" placeholder="Eşya adı, konum, açıklama ara…" oninput="debouncedLoad()">
+    </div>
+    <div class="chips">
+      <button class="chip on" onclick="setFilter(this,'')"      data-f="">Tümü</button>
+      <button class="chip"    onclick="setFilter(this,'lost')"   data-f="lost">🔴 Kayıp</button>
+      <button class="chip"    onclick="setFilter(this,'found')"  data-f="found">🟢 Bulundu</button>
+    </div>
+  </div>
+
+  <!-- Count -->
+  <p id="countLine" class="text-sm text-muted mb-16" style="display:none;"></p>
+
+  <!-- Grid -->
+  <div class="cards-grid" id="grid">
+    <div class="flex-center" style="grid-column:1/-1;padding:48px;"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<footer><div class="container"><p>© 2025 FindIt</p></div></footer>
+
+<script src="/static/js/api.js"></script>
+<script>
+let activeFilter = '';
+let debounceTimer;
+
+function setFilter(btn, val) {
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+  btn.classList.add('on');
+  activeFilter = val;
+  loadReports();
+}
+
+function debouncedLoad() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(loadReports, 320);
+}
+
+async function loadReports() {
+  const grid = document.getElementById('grid');
+  const countLine = document.getElementById('countLine');
+  grid.innerHTML = `<div class="flex-center" style="grid-column:1/-1;padding:48px;"><div class="spinner"></div></div>`;
+  countLine.style.display = 'none';
+
+  const q = document.getElementById('searchInput').value.trim();
+  try {
+    const reports = await api.reports({ type: activeFilter || undefined, q: q || undefined });
+
+    countLine.textContent = `${reports.length} ilan bulundu`;
+    countLine.style.display = reports.length ? '' : 'none';
+
+    if (!reports.length) {
+      grid.innerHTML = `
+        <div class="empty">
+          <div class="empty-icon">📭</div>
+          <p>Hiç ilan bulunamadı.</p>
+          <a href="/create" class="btn btn-primary">İlk İlanı Oluştur</a>
+        </div>`;
+      return;
+    }
+    grid.innerHTML = reports.map(r => reportCard(r)).join('');
+  } catch (err) {
+    grid.innerHTML = `<p class="text-muted text-center" style="grid-column:1/-1;padding:32px;">
+      Yüklenemedi: ${escHtml(err.message)}
+    </p>`;
+  }
+}
+
+loadReports();
+</script>
+</body>
+</html>

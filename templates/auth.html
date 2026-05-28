@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Giriş Yap — FindIt</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="container navbar-inner">
+    <a href="/" class="nav-logo">Find<em>It</em></a>
+    <div class="nav-links"></div>
+    <div class="nav-end" id="navAuth"></div>
+  </div>
+</nav>
+
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="auth-logo">Find<em>It</em></div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab on" id="tabLogin"    onclick="showTab('login')">Giriş Yap</button>
+      <button class="auth-tab"   id="tabRegister"  onclick="showTab('register')">Üye Ol</button>
+    </div>
+
+    <div id="alertBox" class="alert alert-hidden"></div>
+
+    <!-- ── Login ── -->
+    <form id="loginForm" onsubmit="doLogin(event)">
+      <div class="form-group mb-16">
+        <label class="form-label">E-posta</label>
+        <input class="form-input" id="lEmail" type="email" placeholder="ornek@email.com" autocomplete="email" required>
+      </div>
+      <div class="form-group mb-24">
+        <label class="form-label">Şifre</label>
+        <input class="form-input" id="lPass" type="password" placeholder="••••••••" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full" id="loginBtn">Giriş Yap</button>
+      <p class="text-center text-sm text-muted mt-16">
+        Hesabın yok mu?
+        <a href="#" onclick="showTab('register');return false" style="color:var(--accent);font-weight:600;">Üye ol</a>
+      </p>
+    </form>
+
+    <!-- ── Register ── -->
+    <form id="registerForm" style="display:none" onsubmit="doRegister(event)">
+      <div class="form-group mb-16">
+        <label class="form-label">Ad Soyad</label>
+        <input class="form-input" id="rName" type="text" placeholder="Ahmet Yılmaz" autocomplete="name" required>
+      </div>
+      <div class="form-group mb-16">
+        <label class="form-label">E-posta</label>
+        <input class="form-input" id="rEmail" type="email" placeholder="ornek@email.com" autocomplete="email" required>
+      </div>
+      <div class="form-group mb-16">
+        <label class="form-label">Şifre</label>
+        <input class="form-input" id="rPass" type="password" placeholder="En az 6 karakter" autocomplete="new-password" required minlength="6">
+      </div>
+      <div class="form-group mb-24">
+        <label class="form-label">
+          Telefon
+          <span style="color:var(--text-3);font-weight:400;margin-left:4px;">(isteğe bağlı)</span>
+        </label>
+        <input class="form-input" id="rPhone" type="tel" placeholder="05XX XXX XX XX">
+      </div>
+      <button type="submit" class="btn btn-primary btn-full" id="registerBtn">Üye Ol</button>
+      <p class="text-center text-sm text-muted mt-16">
+        Zaten üye misin?
+        <a href="#" onclick="showTab('login');return false" style="color:var(--accent);font-weight:600;">Giriş yap</a>
+      </p>
+    </form>
+  </div>
+</div>
+
+<script src="/static/js/api.js"></script>
+<script>
+if (auth.user) location.href = '/reports';
+
+const params = new URLSearchParams(location.search);
+if (params.get('tab') === 'register') showTab('register');
+
+function showTab(tab) {
+  const isLogin = tab === 'login';
+  document.getElementById('loginForm').style.display    = isLogin ? '' : 'none';
+  document.getElementById('registerForm').style.display = isLogin ? 'none' : '';
+  document.getElementById('tabLogin').className    = 'auth-tab' + (isLogin  ? ' on' : '');
+  document.getElementById('tabRegister').className = 'auth-tab' + (!isLogin ? ' on' : '');
+  hideAlert('alertBox');
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true; btn.textContent = 'Giriş yapılıyor…';
+  hideAlert('alertBox');
+  try {
+    const data = await api.login({
+      email:    document.getElementById('lEmail').value,
+      password: document.getElementById('lPass').value,
+    });
+    auth.user = { id: data.kullanici_id, full_name: data.full_name, email: data.email };
+    location.href = params.get('next') || '/reports';
+  } catch (err) {
+    showAlert('alertBox', err.message);
+    btn.disabled = false; btn.textContent = 'Giriş Yap';
+  }
+}
+
+async function doRegister(e) {
+  e.preventDefault();
+  const btn = document.getElementById('registerBtn');
+  btn.disabled = true; btn.textContent = 'Kaydediliyor…';
+  hideAlert('alertBox');
+  try {
+    await api.register({
+      full_name:    document.getElementById('rName').value,
+      email:        document.getElementById('rEmail').value,
+      password:     document.getElementById('rPass').value,
+      phone_number: document.getElementById('rPhone').value || undefined,
+    });
+    showAlert('alertBox', 'Kayıt başarılı! Giriş yapılıyor…', 'success');
+    const data = await api.login({
+      email:    document.getElementById('rEmail').value,
+      password: document.getElementById('rPass').value,
+    });
+    auth.user = { id: data.kullanici_id, full_name: data.full_name, email: data.email };
+    setTimeout(() => location.href = params.get('next') || '/reports', 900);
+  } catch (err) {
+    showAlert('alertBox', err.message);
+    btn.disabled = false; btn.textContent = 'Üye Ol';
+  }
+}
+</script>
+</body>
+</html>
