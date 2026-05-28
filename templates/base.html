@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>{% block title %}Kayıp Eşya Sistemi{% endblock %}</title>
+   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+   <!-- Navbar (Üst Menü) -->
+   <nav class="navbar">
+      <div class="container navbar-inner">
+         <a href="/" class="nav-logo">Find<em>It</em></a>
+
+         <div class="nav-links">
+            <a href="/" class="nav-link">Ana Sayfa</a>
+            <a href="/reports" class="nav-link">İlanlar</a>
+            <a href="/create" class="nav-link">İlan Bırak</a>
+            <a href="/messages" class="nav-link" id="nav-messages" style="display:none;">Mesajlar</a>
+         </div>
+
+         <div class="nav-end">
+            <a href="#" onclick="logoutUser()" id="nav-logout" style="display:none;" class="btn">Çıkış Yap</a>
+            <a href="/auth" id="nav-auth" class="btn btn-primary">Giriş / Kayıt</a>
+         </div>
+      </div>
+   </nav>
+
+   <!-- Ana İçerik Alanı -->
+   <main class="container">
+      <!-- Flash Mesajları (Hata/Başarı uyarıları) -->
+      {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <div class="flash-messages">
+         {% for category, message in messages %}
+         <div class="alert alert-{{ category }}">{{ message }}</div>
+         {% endfor %}
+      </div>
+      {% endif %}
+      {% endwith %}
+
+      <!-- Sayfaya özel içerik buraya gelecek -->
+      {% block content %}
+      {% endblock %}
+   </main>
+
+   <!-- Footer (Alt Bilgi) -->
+   <footer>
+      <div class="container text-center">
+         <p>&copy; 2026 Kayıp Eşya Sistemi. Tüm hakları saklıdır.</p>
+      </div>
+   </footer>
+
+   <script>
+      // Kullanıcı giriş yapmış mı kontrolü (LocalStorage API yaklaşımı için)
+      document.addEventListener("DOMContentLoaded", () => {
+         const user = localStorage.getItem('user');
+         if (user) {
+            document.getElementById('nav-messages').style.display = 'inline-block';
+            document.getElementById('nav-logout').style.display = 'inline-block';
+            document.getElementById('nav-auth').style.display = 'none';
+         }
+      });
+
+      function logoutUser() {
+         localStorage.removeItem('user');
+         window.location.href = '/';
+      }
+   </script>
+</body>
+
+</html>
