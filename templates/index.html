@@ -3,6 +3,8 @@
 {% block title %}Ana Sayfa — Kayıp Eşya Sistemi{% endblock %}
 
 {% block content %}
+<script src="/static/js/api.js"></script>
+
 <div class="hero"
   style="text-align: center; padding: 3rem 1rem; background: var(--white); border-radius: 12px; margin-bottom: 2rem; box-shadow: var(--shadow-sm); border: 1px solid var(--border);">
   <h1 style="color: var(--text); font-size: 2.5rem; letter-spacing: -0.5px; margin-bottom: 1rem;">
@@ -26,23 +28,83 @@
   </div>
 </div>
 
-<!-- Filtreler ve Butonlar -->
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
   <h2 style="font-size: 1.4rem; color: var(--text);">Güncel İlanlar</h2>
   <a href="/create" class="btn" style="background: var(--accent); color: white;">+ Yeni İlan</a>
 </div>
 
-<!-- İlan Kartları (Grid) -->
-<div id="loading" style="text-align: center; padding: 3rem; color: var(--text-3); font-weight: 500;">İlanlar
-  yükleniyor...</div>
+<div id="loading" style="text-align: center; padding: 3rem; color: var(--text-3); font-weight: 500;">İlanlar yükleniyor...</div>
 <div id="reportsGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem;">
-  <!-- Kartlar buraya JS ile eklenecek -->
+  </div>
+
+<div class="section-sm" style="margin-top: 2rem;">
+  <div class="stats" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+    <div class="stat" style="background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 28px 20px; text-align: center;">
+      <div class="stat-n" id="sTotal" style="font-size: 40px; font-weight: 900; color: var(--accent);">—</div>
+      <div class="stat-l" style="font-size: 13px; color: var(--text-2); margin-top: 6px;">Toplam İlan</div>
+    </div>
+    <div class="stat" style="background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 28px 20px; text-align: center;">
+      <div class="stat-n" id="sFound" style="font-size: 40px; font-weight: 900; color: var(--found);">—</div>
+      <div class="stat-l" style="font-size: 13px; color: var(--text-2); margin-top: 6px;">Bulundu İlanı</div>
+    </div>
+    <div class="stat" style="background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 28px 20px; text-align: center;">
+      <div class="stat-n" id="sLost" style="font-size: 40px; font-weight: 900; color: var(--lost);">—</div>
+      <div class="stat-l" style="font-size: 13px; color: var(--text-2); margin-top: 6px;">Kayıp İlanı</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-head text-center">
+    <h2>Nasıl Çalışır?</h2>
+    <p>Üç adımda kayıp eşyalarını bul ve sahiplerine kavuştur</p>
+  </div>
+  <div class="grid-3">
+    <div class="feature-card">
+      <div class="feature-icon">📝</div>
+      <div class="feature-title">İlan Oluştur</div>
+      <div class="feature-desc">Kaybettiğin ya da bulduğun eşyayı kategori, konum ve açıklama bilgileriyle birlikte sisteme ekle. Dakikalar içinde yayında.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔍</div>
+      <div class="feature-title">Ara & Filtrele</div>
+      <div class="feature-desc">Kayıp veya bulundu ilanlarını kategoriye, konuma, eşya adına göre filtrele. Eşyanı tanıyan biriyle eşleş.</div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🤝</div>
+      <div class="feature-title">İletişime Geç</div>
+      <div class="feature-desc">İlan sahibiyle doğrudan mesajlaşarak eşyanı geri al ya da sahiplerine teslim et. Topluluk seni bekliyor.</div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="background:var(--white); border-top:1px solid var(--border); border-radius: 12px; padding: 2rem; margin-top: 2rem;">
+  <div class="flex-between mb-24">
+    <div>
+      <h2 style="font-size:22px; font-weight:800; letter-spacing:-.3px;">Son İlanlar</h2>
+      <p class="text-muted text-sm mt-8">Topluluğun en güncel kayıp ve bulundu ilanları</p>
+    </div>
+    <a href="/reports" class="btn btn-outline btn-sm">Tümünü Gör →</a>
+  </div>
+  <div class="cards-grid" id="recentCards">
+    <div class="flex-center" style="grid-column:1/-1; padding:48px;"><div class="spinner"></div></div>
+  </div>
 </div>
 
 <script>
-  document.addEventListener("DOMContentLoaded", () => {
-    loadReports();
-  });
+  function toggleCardDetail(cardEl) {
+    const isExpanded = cardEl.classList.toggle('expanded');
+    const shortDesc = cardEl.querySelector('.card-desc-short');
+    const fullDesc = cardEl.querySelector('.card-desc-full');
+
+    if (isExpanded) {
+      if (shortDesc) shortDesc.style.display = 'none';
+      if (fullDesc) fullDesc.style.display = 'block';
+    } else {
+      if (shortDesc) shortDesc.style.display = 'block';
+      if (fullDesc) fullDesc.style.display = 'none';
+    }
+  }
 
   async function loadReports() {
     const grid = document.getElementById('reportsGrid');
@@ -54,14 +116,12 @@
     loading.style.display = 'block';
 
     try {
-      // Backend API'sine GET isteği atıyoruz
       let url = '/api/reports?';
       if (searchQuery) url += `q=${encodeURIComponent(searchQuery)}&`;
       if (typeFilter) url += `type=${typeFilter}`;
 
       const res = await fetch(url);
       const reports = await res.json();
-
       loading.style.display = 'none';
 
       if (reports.length === 0) {
@@ -69,6 +129,7 @@
         return;
       }
 
+      // Üst arama gridindeki ilanları güvenli şekilde ekrana basıyoruz
       reports.forEach(report => {
         const isLost = report.type === 'lost';
         const typeLabel = isLost ? 'Kayıp' : 'Bulundu';
@@ -76,7 +137,12 @@
         const typeColor = isLost ? 'var(--lost)' : 'var(--found)';
         const typeBorder = isLost ? 'var(--lost-border)' : 'var(--found-border)';
 
+        const fullDesc = report.description ? report.description : 'Açıklama belirtilmemiş.';
+        const shortDesc = report.description ? report.description.substring(0, 140) + (report.description.length > 140 ? '…' : '') : 'Açıklama belirtilmemiş.';
+
         const card = document.createElement('div');
+        card.className = 'card clickable-card';
+        card.setAttribute('onclick', 'toggleCardDetail(this)');
         card.style.background = 'var(--white)';
         card.style.border = '1px solid var(--border)';
         card.style.borderRadius = 'var(--radius)';
@@ -84,125 +150,63 @@
         card.style.display = 'flex';
         card.style.flexDirection = 'column';
         card.style.boxShadow = 'var(--shadow-sm)';
-        card.style.transition = 'transform var(--t)';
+        card.style.transition = 'transform var(--t), box-shadow var(--t), border-color var(--t)';
 
-        // Tarihi Türkçe formatta yazdır
         const d = new Date(report.created_at);
         const dateStr = d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' });
 
+        let currentUser = null;
+        try { currentUser = JSON.parse(localStorage.getItem('user')); } catch (e) { }
+
+        const isOwn = currentUser && currentUser.kullanici_id === report.user_id;
+        const msgUrl = `/messages?to=${report.user_id}&item=${encodeURIComponent(report.item_name)}`;
+
+        const footerHtml = isOwn
+          ? `<span style="font-size:12px;color:var(--text-3);padding:4px 0;">Benim ilanım</span>`
+          : `<button class="btn btn-ghost btn-sm main-match-btn" onclick="openMatchModal(${report.id || report.report_id}, '${report.type}', event)" style="margin-right:auto; color:var(--accent); font-weight:700;">Eşleştir</button>
+             <a href="${msgUrl}" class="btn btn-outline btn-sm" onclick="event.stopPropagation();">Mesaj Gönder</a>`;
+
         card.innerHTML = `
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
-                        <span style="background: ${typeBg}; color: ${typeColor}; border: 1px solid ${typeBorder}; padding: 4px 10px; border-radius: var(--radius-xl); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;">
-                            ${typeLabel}
-                        </span>
-                        <span style="font-size: 0.85rem; color: var(--text-3); font-weight: 500;">${dateStr}</span>
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                        <div style="display:flex; flex-direction:column; gap:2px;">
+                          <span style="font-size: 11px; color: var(--text-3); font-weight: 700;">İLAN NO: #${report.id || report.report_id}</span>
+                          <h3 style="color: var(--text); font-size: 1.2rem; margin: 0;">${report.item_name}</h3>
+                        </div>
+                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                           <span style="background: ${typeBg}; color: ${typeColor}; border: 1px solid ${typeBorder}; padding: 4px 10px; border-radius: var(--radius-xl); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;">
+                               ${typeLabel}
+                           </span>
+                           <span style="font-size: 0.8rem; color: var(--text-3); font-weight: 500;">${dateStr}</span>
+                        </div>
                     </div>
                     
-                    <h3 style="margin-bottom: 0.5rem; color: var(--text); font-size: 1.2rem;">${report.item_name}</h3>
-                    <p style="color: var(--text-2); font-size: 0.95rem; margin-bottom: 1.5rem; flex: 1; line-height: 1.5;">
-                        ${report.description || 'Açıklama belirtilmemiş.'}
+                    <p class="card-desc-short" style="color: var(--text-2); font-size: 0.95rem; margin-bottom: 1.5rem; flex: 1; line-height: 1.5; margin-top: 0.5rem;">
+                        ${shortDesc}
+                    </p>
+                    <p class="card-desc-full" style="display:none; color: var(--text-2); font-size: 0.95rem; margin-bottom: 1.5rem; flex: 1; line-height: 1.6; margin-top: 0.5rem;">
+                        <strong>Detay: </strong>${fullDesc}
                     </p>
                     
-                    <div style="background: var(--surface); padding: 1rem; border-radius: var(--radius-sm); font-size: 0.85rem; color: var(--text-2); margin-bottom: 1rem; border: 1px solid var(--border);">
+                    <div style="background: var(--surface); padding: 1rem; border-radius: var(--radius-sm); font-size: 0.85rem; color: var(--text-2); border: 1px solid var(--border);">
                         <div style="margin-bottom: 4px;">📍 <strong style="color: var(--text);">${report.location || 'Bilinmiyor'}</strong></div>
                         <div style="margin-bottom: 4px;">🏷️ <span style="opacity: 0.8;">Kategori:</span> <strong style="color: var(--text);">${report.category_name}</strong></div>
                         <div>👤 <span style="opacity: 0.8;">İlan Sahibi:</span> <strong style="color: var(--text);">${report.reported_by}</strong></div>
                     </div>
+
+                    <div class="match-selector-area" style="display:none; width:100%;"></div>
+
+                    <div style="display:flex; justify-content:flex-end; gap:8px; padding-top:1rem; border-top:1px solid var(--border); margin-top:1rem;">
+                        ${footerHtml}
+                    </div>
                 `;
-
-        // Fare üzerine gelince kart efektleri için (hover)
-        card.onmouseenter = () => card.style.transform = 'translateY(-4px)';
-        card.onmouseleave = () => card.style.transform = 'translateY(0)';
-
         grid.appendChild(card);
       });
     } catch (err) {
       loading.style.display = 'none';
       grid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: var(--danger);">İlanlar yüklenirken sunucu ile bağlantı kurulamadı.</div>';
-      console.error(err);
     }
   }
-</script>
-{% endblock %}
-<div class="stat-l">Bulundu İlanı</div>
-</div>
-<div class="stat">
-  <div class="stat-n" id="sLost">—</div>
-  <div class="stat-l">Kayıp İlanı</div>
-</div>
-</div>
-</div>
-</div>
 
-<!-- How it works -->
-<div class="section">
-  <div class="container">
-    <div class="section-head text-center">
-      <h2>Nasıl Çalışır?</h2>
-      <p>Üç adımda kayıp eşyalarını bul ve sahiplerine kavuştur</p>
-    </div>
-    <div class="grid-3">
-      <div class="feature-card">
-        <div class="feature-icon">📝</div>
-        <div class="feature-title">İlan Oluştur</div>
-        <div class="feature-desc">Kaybettiğin ya da bulduğun eşyayı kategori, konum ve açıklama bilgileriyle birlikte
-          sisteme ekle. Dakikalar içinde yayında.</div>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🔍</div>
-        <div class="feature-title">Ara & Filtrele</div>
-        <div class="feature-desc">Kayıp veya bulundu ilanlarını kategoriye, konuma, eşya adına göre filtrele. Eşyanı
-          tanıyan biriyle eşleş.</div>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🤝</div>
-        <div class="feature-title">İletişime Geç</div>
-        <div class="feature-desc">İlan sahibiyle doğrudan mesajlaşarak eşyanı geri al ya da sahiplerine teslim et.
-          Topluluk seni bekliyor.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Recent reports -->
-<div class="section" style="background:var(--white);border-top:1px solid var(--border);">
-  <div class="container">
-    <div class="flex-between mb-24">
-      <div>
-        <h2 style="font-size:22px;font-weight:800;letter-spacing:-.3px;">Son İlanlar</h2>
-        <p class="text-muted text-sm mt-8">Topluluğun en güncel kayıp ve bulundu ilanları</p>
-      </div>
-      <a href="/reports" class="btn btn-outline btn-sm">Tümünü Gör →</a>
-    </div>
-    <div class="cards-grid" id="recentCards">
-      <div class="flex-center" style="grid-column:1/-1;padding:48px;">
-        <div class="spinner"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- CTA -->
-<div class="section text-center">
-  <div class="container">
-    <h2 style="font-size:28px;font-weight:900;letter-spacing:-.4px;margin-bottom:12px;">
-      Topluluğa Katıl
-    </h2>
-    <p class="text-muted mb-24" style="font-size:16px;">
-      Ücretsiz hesap oluştur, ilanlarını yayınla, eşyalarını geri bul.
-    </p>
-    <a href="/auth?tab=register" class="btn btn-primary btn-lg">Ücretsiz Üye Ol</a>
-  </div>
-</div>
-
-<footer>
-  <div class="container">
-    <p>© 2025 FindIt &nbsp;·&nbsp; <a href="/reports">İlanlar</a> &nbsp;·&nbsp; <a href="/auth">Giriş Yap</a></p>
-  </div>
-</footer>
-
-<script src="/static/js/api.js"></script>
-<script>
   async function loadPage() {
     try {
       const reports = await api.reports();
@@ -220,16 +224,18 @@
           <a href="/create" class="btn btn-primary">İlan Oluştur</a>
         </div>`;
       } else {
+        // Alt kısımdaki son ilanların butonları da api.js'e bağlandı kanka!
         el.innerHTML = recent.map(r => reportCard(r)).join('');
       }
     } catch (err) {
-      document.getElementById('recentCards').innerHTML =
-        `<p class="text-muted text-center" style="grid-column:1/-1;padding:32px;">İlanlar yüklenemedi: ${escHtml(err.message)}</p>`;
+      console.error(err);
     }
   }
 
-  loadPage();
+  // Sayfa tamamen hazır olunca iki alanı birden asenkron ayağa kaldırıyoruz
+  document.addEventListener("DOMContentLoaded", () => {
+    loadReports();
+    loadPage();
+  });
 </script>
-</body>
-
-</html>
+{% endblock %}

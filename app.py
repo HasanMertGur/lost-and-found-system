@@ -31,6 +31,10 @@ def create_page():
 def messages_page():
     return render_template('messages.html')
 
+@app.route('/matches')
+def matches_page():
+    return render_template('matches.html')
+
 # React'ın yerel sunucusundan (5173 portu) gelen tüm veri isteklerine tam yetki verdik
 CORS(app, resources={r"/api/*": {"origins": "http://localhost:5173"}})
 

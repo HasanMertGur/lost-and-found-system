@@ -1,0 +1,325 @@
+{% extends "base.html" %}
+
+{% block title %}Eşleşmelerim — Kayıp Eşya Sistemi{% endblock %}
+
+{% block content %}
+<style>
+   .matches-hero {
+      background: linear-gradient(180deg, var(--white), var(--surface));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 28px;
+      box-shadow: var(--shadow-sm);
+      margin: 28px 0 22px;
+   }
+
+   .matches-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+   }
+
+   .matches-title {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -.4px;
+      margin-bottom: 6px;
+   }
+
+   .matches-sub {
+      color: var(--text-2);
+      font-size: 15px;
+   }
+
+   .matches-grid {
+      display: grid;
+      gap: 16px;
+      margin-bottom: 24px;
+   }
+
+   .match-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: var(--shadow-sm);
+   }
+
+   .match-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+   }
+
+   .match-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+   }
+
+   .match-message {
+      font-size: 16px;
+      line-height: 1.7;
+      color: var(--text);
+      margin-bottom: 14px;
+   }
+
+   .match-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+   }
+
+   .match-meta div {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      color: var(--text-2);
+      font-size: 14px;
+   }
+
+   .match-meta strong {
+      color: var(--text);
+   }
+
+   .match-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+   }
+
+   .match-note {
+      margin-top: 12px;
+      color: var(--text-3);
+      font-size: 13px;
+   }
+
+   .match-empty {
+      text-align: center;
+      background: var(--white);
+      border: 1px dashed var(--border-strong);
+      border-radius: 16px;
+      padding: 56px 24px;
+      color: var(--text-3);
+   }
+</style>
+
+<section class="matches-hero">
+   <div class="matches-head">
+      <div>
+         <h1 class="matches-title">Eşleşmelerim</h1>
+         <p class="matches-sub">Size ait ilanlarla ilgili eşleşme isteklerini burada görüntüleyebilir ve uygun olanları
+            onaylayabilirsiniz.</p>
+      </div>
+      <a href="/reports" class="btn btn-outline">İlanlara Dön</a>
+   </div>
+</section>
+
+<div id="matchesLoading" class="match-empty">Eşleşmeler yükleniyor...</div>
+<div id="matchesGrid" class="matches-grid" style="display:none;"></div>
+
+<script>
+   let currentUser = null;
+
+   function escHtml(value) {
+      return String(value ?? '')
+         .replace(/&/g, '&amp;')
+         .replace(/</g, '&lt;')
+         .replace(/>/g, '&gt;')
+         .replace(/"/g, '&quot;');
+   }
+
+   function getUserId(user) {
+      if (!user) return null;
+      return user.kullanici_id ?? user.id ?? null;
+   }
+
+   function badge(text, type) {
+      const cls = type === 'success'
+         ? 'badge badge-found'
+         : type === 'danger'
+            ? 'badge badge-lost'
+            : 'badge';
+      return `<span class="${cls}" style="text-transform:none; letter-spacing:0; font-size:12px; padding:5px 11px;">${text}</span>`;
+   }
+
+   function scenarioText(match) {
+      if (!match.lost_report_id && match.found_report_id) {
+         return `📢 Bir kullanıcı, açtığınız <strong>${escHtml(match.found_item_name || 'ilan')}</strong> ilanı için hak iddia ediyor!`;
+      }
+
+      if (match.lost_report_id && !match.found_report_id) {
+         return `📌 Bir kullanıcı, kaybettiğinizi belirttiğiniz <strong>${escHtml(match.lost_item_name || 'ilan')}</strong> ilanındaki eşyayı bulduğunu iddia ediyor!`;
+      }
+
+      return `🔄 <strong>${escHtml(match.lost_user_name || 'Bir kullanıcı')}</strong> kullanıcısının <strong>${escHtml(match.lost_item_name || 'kayıp eşyası')}</strong> kayıp ilanı ile, <strong>${escHtml(match.found_user_name || 'bir kullanıcı')}</strong> kullanıcısının <strong>${escHtml(match.found_item_name || 'buluntu eşyası')}</strong> buluntu ilanı sistemde eşleşti!`;
+   }
+
+   function scenarioType(match) {
+      if (!match.lost_report_id && match.found_report_id) return 'found-only';
+      if (match.lost_report_id && !match.found_report_id) return 'lost-only';
+      return 'both';
+   }
+
+   function actionHtml(match) {
+      const userId = getUserId(currentUser);
+      const type = scenarioType(match);
+      const confirmed = !!match.is_confirmed;
+
+      if (confirmed) {
+         return `<span class="badge badge-found">Onaylandı</span>`;
+      }
+
+      if (type === 'found-only' && userId && userId === match.found_user_id) {
+         return `<button class="btn btn-primary" onclick="confirmMatch(${match.match_id}, this)">Eşyayı Teslim Ettim (Onayla)</button>`;
+      }
+
+      if (type === 'lost-only' && userId && userId === match.lost_user_id) {
+         return `<button class="btn btn-primary" onclick="confirmMatch(${match.match_id}, this)">Eşyamı Teslim Aldım (Onayla)</button>`;
+      }
+
+      if (type === 'both' && userId && (userId === match.lost_user_id || userId === match.found_user_id)) {
+         return `<button class="btn btn-primary" onclick="confirmMatch(${match.match_id}, this)">Eşleşmeyi Kesinleştir</button>`;
+      }
+
+      return `<span class="badge" style="background:var(--surface); border:1px solid var(--border); color:var(--text-2); text-transform:none; letter-spacing:0; font-size:12px; padding:5px 11px;">Onay bekleniyor</span>`;
+   }
+
+   function renderMatch(match) {
+      const type = scenarioType(match);
+      const statusBadge = match.is_confirmed
+         ? badge('Kapanmış', 'success')
+         : badge('Onay Bekliyor', 'warning');
+
+      const typeBadge = type === 'found-only'
+         ? badge('Tek Taraf: Buluntu', 'warning')
+         : type === 'lost-only'
+            ? badge('Tek Taraf: Kayıp', 'danger')
+            : badge('Standart Eşleşme', 'success');
+
+      const createdMeta = match.match_id ? `#${match.match_id}` : '—';
+
+      return `
+      <article class="match-card">
+        <div class="match-top">
+          <div class="match-badges">
+            ${typeBadge}
+            ${statusBadge}
+          </div>
+          <div class="badge" style="background:var(--surface); border:1px solid var(--border); color:var(--text-2); text-transform:none; letter-spacing:0; font-size:12px; padding:5px 11px;">Eşleşme ID: ${createdMeta}</div>
+        </div>
+
+        <div class="match-message">${scenarioText(match)}</div>
+
+        <div class="match-meta">
+          <div>
+            <strong>Kayıp İlanı:</strong><br>
+            ${match.lost_item_name ? escHtml(match.lost_item_name) : 'Yok'}
+            ${match.lost_user_name ? `<br><span class="text-xs">Sahip: ${escHtml(match.lost_user_name)}</span>` : ''}
+          </div>
+          <div>
+            <strong>Buluntu İlanı:</strong><br>
+            ${match.found_item_name ? escHtml(match.found_item_name) : 'Yok'}
+            ${match.found_user_name ? `<br><span class="text-xs">Sahip: ${escHtml(match.found_user_name)}</span>` : ''}
+          </div>
+        </div>
+
+        <div class="match-actions">
+          ${actionHtml(match)}
+        </div>
+
+        <div class="match-note">
+          ${type === 'both'
+            ? 'İki taraf da ilan açtıysa eşleşme doğrulandıktan sonra ilgili ilanlar çözüldü olarak işaretlenir.'
+            : 'Tek taraflı eşleşmede, ilan sahibinin onayı tamamlandığında işlem kapatılır.'}
+        </div>
+      </article>
+    `;
+   }
+
+   async function loadMatches() {
+      const loading = document.getElementById('matchesLoading');
+      const grid = document.getElementById('matchesGrid');
+
+      const userStr = localStorage.getItem('user');
+      if (!userStr) {
+         window.location.href = '/auth?next=/matches';
+         return;
+      }
+
+      try {
+         currentUser = JSON.parse(userStr);
+      } catch (err) {
+         window.location.href = '/auth?next=/matches';
+         return;
+      }
+
+      const userId = getUserId(currentUser);
+      if (!userId) {
+         window.location.href = '/auth?next=/matches';
+         return;
+      }
+
+      try {
+         const res = await fetch(`/api/matches/${userId}`);
+         const matches = await res.json();
+
+         loading.style.display = 'none';
+         grid.style.display = 'grid';
+
+         if (!res.ok) {
+            const msg = matches?.message || 'Eşleşmeler yüklenemedi.';
+            grid.innerHTML = `<div class="match-empty" style="grid-column:1/-1; color:var(--lost);">${escHtml(msg)}</div>`;
+            return;
+         }
+
+         if (!Array.isArray(matches) || matches.length === 0) {
+            grid.innerHTML = `
+          <div class="match-empty" style="grid-column:1/-1;">
+            <div style="font-size:48px; margin-bottom:14px;">🤝</div>
+            <h3 style="color:var(--text); margin-bottom:8px;">Henüz eşleşme yok</h3>
+            <p>İlanlarınızla ilgili bir eşleşme bulunduğunda burada görünecek.</p>
+          </div>`;
+            return;
+         }
+
+         grid.innerHTML = matches.map(renderMatch).join('');
+      } catch (err) {
+         loading.style.display = 'none';
+         grid.style.display = 'grid';
+         grid.innerHTML = `<div class="match-empty" style="grid-column:1/-1; color:var(--lost);">Eşleşmeler yüklenirken bir hata oluştu.</div>`;
+      }
+   }
+
+   async function confirmMatch(matchId, buttonEl) {
+      if (!matchId) return;
+      const btn = buttonEl;
+      const oldText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Onaylanıyor...';
+
+      try {
+         const res = await fetch(`/api/matches/${matchId}/confirm`, { method: 'POST' });
+         const data = await res.json();
+         if (!res.ok) throw new Error(data.message || 'Onay işlemi başarısız oldu.');
+         await loadMatches();
+      } catch (err) {
+         alert(err.message || 'Onay işlemi başarısız oldu.');
+         btn.disabled = false;
+         btn.textContent = oldText;
+      }
+   }
+
+   document.addEventListener('DOMContentLoaded', loadMatches);
+</script>
+{% endblock %}
