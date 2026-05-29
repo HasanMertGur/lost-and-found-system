@@ -6,11 +6,10 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# HTML ve statik klasör ayarlarını tamamen uçurduk, sadeleştirdik.
 app = Flask(__name__)
-app.secret_key = "super_gizli_anahtar" # Flash mesajları ve (gerekirse) session için gerekli
+app.secret_key = "super_gizli_anahtar"
 
-# ── HTML SAYFA YÖNLENDİRMELERİ ───────────────────────────────────────
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -35,10 +34,10 @@ def messages_page():
 def matches_page():
     return render_template('matches.html')
 
-# React'ın yerel sunucusundan (5173 portu) gelen tüm veri isteklerine tam yetki verdik
+
 CORS(app, resources={r"/api/*": {"origins": "http://localhost:5173"}})
 
-# ── BULUT VERİTABANI BAĞLANTI BİLGİSİ ──────────────────────────────────
+
 DB_URL = "postgresql://neondb_owner:npg_TAWSX45LkoFz@ep-round-mud-abh152jo.eu-west-2.aws.neon.tech/neondb?sslmode=require"
 
 def get_db_connection():
@@ -50,9 +49,8 @@ def get_db_connection():
         return None
 
 
-# ── API UÇ NOKTALARI (SADECE SAF JSON VERİ YAPILARI ÜRETİR) ─────────────────
 
-# 1. Kullanıcı Kayıt
+
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -86,7 +84,7 @@ def register():
         cursor.close()
         conn.close()
 
-# 2. Kullanıcı Giriş
+
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -112,7 +110,7 @@ def login():
     else:
         return jsonify({"message": "Gecersiz e-posta veya sifre."}), 401
 
-# 3. Kategorileri Listeleme Yardımcısı
+
 @app.route('/api/categories', methods=['GET'])
 def get_categories():
     conn = get_db_connection()
@@ -126,7 +124,7 @@ def get_categories():
     conn.close()
     return jsonify(categories), 200
 
-# 4. Dinamik Arama ve Filtreleme Destekli İlan Listeleme
+
 @app.route('/api/reports', methods=['GET'])
 def get_reports():
     report_type = request.args.get('type')
@@ -166,7 +164,6 @@ def get_reports():
     conn.close()
     return jsonify(reports), 200
 
-# 5. İlan Oluşturma
 @app.route('/api/reports', methods=['POST'])
 def create_report():
     data = request.get_json()
@@ -180,19 +177,19 @@ def create_report():
     location = data.get('location')
     
     if report_type not in ("lost", "found"):
-        print("❌ [FLASK] Hata: İlan türü 'lost' ya da 'found' değil!")
+        print("[FLASK] Hata: İlan türü 'lost' ya da 'found' değil!")
         return jsonify({"message": "type 'lost' veya 'found' olmali."}), 400
         
     conn = get_db_connection()
     if conn is None: 
-        print("❌ [FLASK] Hata: Veritabanı bağlantısı kurulamadı!")
+        print("[FLASK] Hata: Veritabanı bağlantısı kurulamadı!")
         return jsonify({"message": "Veritabanı bağlantı hatası."}), 500
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     try:
         cursor.execute("SELECT user_id FROM users WHERE user_id = %s;", (user_id,))
         if not cursor.fetchone():
-            print(f"❌ [FLASK] Hata: user_id {user_id} veritabanında yok!")
+            print(f"[FLASK] Hata: user_id {user_id} veritabanında yok!")
             return jsonify({"message": "Kullanici bulunamadi."}), 404
             
         cursor.execute(
@@ -208,16 +205,16 @@ def create_report():
         rid = cursor.fetchone()['report_id']
         
         conn.commit()
-        print(f"✅ [FLASK] İlan başarıyla DB'ye yazıldı! Rapor ID: {rid}")
+        print(f"[FLASK] İlan başarıyla DB'ye yazıldı! Rapor ID: {rid}")
         return jsonify({"message": "Ilan olusturuldu.", "report_id": rid}), 201
     except Exception as e:
         conn.rollback()
-        print("❌ [FLASK] SQL Hatası oluştu:", str(e))
+        print("[FLASK] SQL Hatası oluştu:", str(e))
         return jsonify({"message": f"Hata oluştu: {str(e)}"}), 500
     finally:
         cursor.close()
         conn.close()
-# 6. Mesaj Gönderme
+
 @app.route('/api/messages', methods=['POST'])
 def send_message():
     data = request.get_json()
@@ -246,7 +243,7 @@ def send_message():
         cursor.close()
         conn.close()
 
-# 7. Gelen Kutusu (Inbox) ve Giden Kutusu (Sent) Mesaj Çekme
+
 @app.route('/api/messages/<int:user_id>', methods=['GET'])
 def get_messages(user_id):
     box = request.args.get('box', 'inbox')
@@ -287,15 +284,14 @@ def get_messages(user_id):
     conn.close()
     return jsonify(messages), 200
 
-# 8. Eşleşme Kaydı Oluşturma
-# 8. Gelişmiş Eşleşme Kaydı Oluşturma (Tek İlanlı Eşleşme Destekli)
+
 @app.route('/api/matches', methods=['POST'])
 def create_match():
     data = request.get_json()
-    lost_report_id = data.get('lost_report_id')  # NULL gelebilir kanka
-    found_report_id = data.get('found_report_id') # NULL gelebilir kanka
+    lost_report_id = data.get('lost_report_id')
+    found_report_id = data.get('found_report_id')
     
-    # Güvenlik Kontrolü: En az bir tanesi dolu olmak zorunda!
+
     if not lost_report_id and not found_report_id:
         return jsonify({"message": "Eşleşme oluşturabilmek için en least bir ilan ID'si gereklidir."}), 400
         
@@ -304,21 +300,21 @@ def create_match():
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     try:
-        # Eğer Kayıp İlanı ID'si gönderildiyse doğrula
+
         if lost_report_id:
             cursor.execute("SELECT report_id, type FROM report WHERE report_id = %s;", (lost_report_id,))
             lost = cursor.fetchone()
             if not lost: return jsonify({"message": f"lost_report_id={lost_report_id} bulunamadi."}), 404
             if lost["type"] != "lost": return jsonify({"message": "lost_report_id 'lost' turunde degil."}), 400
             
-        # Eğer Buluntu İlanı ID'si gönderildiyse doğrula
+
         if found_report_id:
             cursor.execute("SELECT report_id, type FROM report WHERE report_id = %s;", (found_report_id,))
             found = cursor.fetchone()
             if not found: return jsonify({"message": f"found_report_id={found_report_id} bulunamadi."}), 404
             if found["type"] != "found": return jsonify({"message": "found_report_id 'found' turunde degil."}), 400
             
-        # SQL'e kayıt atıyoruz. (Eksik olan ID veritabanına otomatik NULL olarak yazılacak kanka)
+
         cursor.execute(
             """INSERT INTO matches (lost_report_id, found_report_id, is_confirmed) 
                VALUES (%s, %s, FALSE) RETURNING match_id;""",
@@ -330,7 +326,8 @@ def create_match():
     finally:
         cursor.close()
         conn.close()
-# 9. Spesifik İlan Detaylarını Çekme
+
+
 @app.route('/api/reports/<int:report_id>', methods=['GET'])
 def get_report_detail(report_id):
     conn = get_db_connection()
@@ -358,14 +355,14 @@ def get_report_detail(report_id):
     else:
         return jsonify({"message": "İlan bulunamadı."}), 404
 
-# 10. Giriş Yapmış Kullanıcının Eşleşme İsteklerini Listeleme (Matches Sekmesi İçin)
+
 @app.route('/api/matches/<int:user_id>', methods=['GET'])
 def get_user_matches(user_id):
     conn = get_db_connection()
     if conn is None: return jsonify({"message": "Veritabanı bağlantı hatası."}), 500
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
-    # Bu sorgu: Kullanıcıya ait olan ilanlarla (lost veya found) ilişkili tüm eşleşme isteklerini getirir.
+
     sql = """
         SELECT 
             m.match_id, 
@@ -404,7 +401,7 @@ def get_user_matches(user_id):
         conn.close()
 
 
-# 11. Eşleşme İsteğini Onaylama (is_confirmed alanını TRUE yapma)
+
 @app.route('/api/matches/<int:match_id>/confirm', methods=['POST'])
 def confirm_match(match_id):
     conn = get_db_connection()
@@ -412,7 +409,7 @@ def confirm_match(match_id):
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     try:
-        # Eşleşmeyi bul ve güncelle
+
         cursor.execute(
             "UPDATE matches SET is_confirmed = TRUE WHERE match_id = %s RETURNING match_id, lost_report_id, found_report_id;",
             (match_id,)
@@ -422,8 +419,7 @@ def confirm_match(match_id):
         if not row:
             return jsonify({"message": "Eşleşme kaydı bulunamadı."}), 404
             
-        # --- BONUS MÜHENDİSLİK MANTIĞI ---
-        # Eşleşme kesinleştiği için ilgili ilanların durumunu (status) 'resolved' (çözüldü) yapıyoruz ki ana sayfada görünmesinler!
+       
         if row['lost_report_id']:
             cursor.execute("UPDATE report SET status = 'resolved' WHERE report_id = %s;", (row['lost_report_id'],))
         if row['found_report_id']:
@@ -440,5 +436,5 @@ def confirm_match(match_id):
 
 
 if __name__ == '__main__':
-    # Flask sunucumuzu 5000 portunda asıl veri motoru olarak başlattık
+
     app.run(debug=True, port=5000)
