@@ -18,6 +18,7 @@
             <a href="/" class="nav-link">Ana Sayfa</a>
             <a href="/reports" class="nav-link">İlanlar</a>
             <a href="/create" class="nav-link">İlan Bırak</a>
+            <a href="/matches" class="nav-link" id="nav-matches" style="display:none;">Eşleşmelerim</a>
             <a href="/messages" class="nav-link" id="nav-messages" style="display:none;">Mesajlar</a>
          </div>
 
@@ -58,6 +59,7 @@
       document.addEventListener("DOMContentLoaded", () => {
          const user = localStorage.getItem('user');
          if (user) {
+            document.getElementById('nav-matches').style.display = 'inline-block';
             document.getElementById('nav-messages').style.display = 'inline-block';
             document.getElementById('nav-logout').style.display = 'inline-block';
             document.getElementById('nav-auth').style.display = 'none';
